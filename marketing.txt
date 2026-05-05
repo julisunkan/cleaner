@@ -1,0 +1,210 @@
+================================================================
+IMAGE METADATA REMOVAL TOOL — MARKETING COPY
+================================================================
+
+
+----------------------------------------------------------------
+SHORT DESCRIPTION (under 160 characters)
+----------------------------------------------------------------
+Remove hidden EXIF data from your photos instantly. Protect your
+location, device, and identity before sharing images online.
+
+
+----------------------------------------------------------------
+MEDIUM DESCRIPTION (under 300 words)
+----------------------------------------------------------------
+Every photo you take contains hidden data you can't see — your
+exact GPS coordinates, the device you used, the time and date,
+and even your camera's serial number. This information travels
+with your image every time you share it online.
+
+Image MetaData Removal Tool strips that data out completely,
+giving you full control over what you share and what you keep
+private. Upload a JPG, PNG, or WebP image, choose your clean
+mode, and download a privacy-safe version in seconds — no
+account required, no files stored on our servers.
+
+Whether you're a journalist protecting a source, a seller
+removing your home address from listing photos, or just someone
+who values their privacy, this tool gives you a clear picture
+of exactly what's hiding in your images — and removes it cleanly.
+
+
+----------------------------------------------------------------
+LONG DESCRIPTION / LANDING PAGE COPY
+----------------------------------------------------------------
+
+HEADLINE:
+Your photos reveal more than you think. Take that power back.
+
+SUBHEADLINE:
+Image MetaData Removal Tool detects, shows, and strips hidden
+EXIF data from your photos — for free, with no signup, and
+nothing ever stored on our servers.
+
+BODY:
+
+What is image metadata?
+Every digital photo carries invisible data called EXIF metadata.
+This can include your precise GPS location, the make and model
+of your phone or camera, the date and time the photo was taken,
+your device's serial number, and the software used to edit it.
+When you post a photo online, that data often goes with it.
+
+Who is this for?
+— Journalists and activists who need to protect sources
+— Real estate sellers who don't want their home's location
+  embedded in listing photos
+— Privacy-conscious individuals who don't want their device
+  fingerprint shared with every image
+— Developers and designers who need clean, metadata-free assets
+— Anyone who shares photos publicly and values their privacy
+
+What you can do:
+
+  Remove All Metadata
+  Wipes every EXIF field — camera info, timestamps, GPS,
+  software, copyright, serial numbers — everything.
+
+  GPS Only
+  Removes just location data while keeping other metadata
+  like camera model and timestamps intact.
+
+  Custom Field Editor
+  Choose exactly which fields to remove and which to keep.
+  Fine-grained control for advanced users.
+
+  Format Conversion
+  Output your cleaned image as JPEG, PNG, or WebP regardless
+  of the original format.
+
+  Resize on Clean
+  Limit output dimensions (e.g. max 1920px wide) as part of
+  the cleaning step.
+
+  Privacy Risk Score
+  Every image receives a risk rating — LOW, MEDIUM, or HIGH —
+  based on what data was found. See at a glance how exposed
+  your photo was before cleaning.
+
+  Batch Processing
+  Upload and clean dozens of images at once. Download all
+  cleaned files in a single ZIP.
+
+  GPS Map View
+  See exactly where your photos were taken, plotted on an
+  interactive map — before you remove the coordinates.
+
+  Metadata CSV Export
+  Download a full before-and-after report of every field
+  detected in your image.
+
+  Session History
+  Every cleaned image is saved in your browser session for
+  re-download. Nothing touches our servers after processing.
+
+  Undo / Get Original
+  Changed your mind? Retrieve the original uncleaned file
+  from your session at any time.
+
+Privacy guarantee:
+Files are deleted from our server the instant you download
+them. We do not log your images, store metadata, or track
+what you upload. Your privacy is the entire point.
+
+CLOSING CTA:
+Drop your image. See what's hiding. Clean it in one click.
+
+
+----------------------------------------------------------------
+TAGLINES (pick one)
+----------------------------------------------------------------
+1. Strip the data. Keep the photo.
+2. What's hiding in your images? Find out — then remove it.
+3. One click. Zero metadata. Total privacy.
+4. Your photo. Your data. Your call.
+5. See what your camera stored. Then delete it.
+6. Photos without the footprint.
+7. Clean images. Nothing left behind.
+
+
+----------------------------------------------------------------
+SEO KEYWORDS
+----------------------------------------------------------------
+
+Primary:
+  remove image metadata
+  EXIF data remover
+  photo metadata cleaner
+  strip EXIF from image
+  remove GPS from photo
+  image privacy tool
+  delete metadata from photo
+
+Secondary:
+  remove location data from photo
+  EXIF cleaner online
+  photo metadata remover free
+  strip metadata from JPEG
+  remove EXIF GPS coordinates
+  image metadata editor
+  bulk EXIF remover
+  clean image metadata
+  EXIF data scrubber
+  privacy image cleaner
+  remove camera info from photo
+  metadata removal tool online
+
+Long-tail:
+  how to remove GPS location from photo before sharing
+  remove hidden data from image before posting online
+  strip EXIF metadata from photo without losing quality
+  free tool to remove metadata from multiple images at once
+  how to hide location data in photos
+  remove device information from image file
+  check what metadata is hidden in my photo
+  batch remove EXIF data from photos
+  convert image and remove metadata at the same time
+  see GPS coordinates embedded in photo
+
+
+----------------------------------------------------------------
+META TAGS (HTML)
+----------------------------------------------------------------
+<meta name="description" content="Free online tool to remove
+hidden EXIF metadata from photos. Strip GPS location, camera
+info, timestamps, and more. Batch processing, risk scoring,
+and CSV export included. No signup. Files deleted instantly.">
+
+<meta name="keywords" content="remove image metadata, EXIF
+remover, strip GPS from photo, photo privacy tool, metadata
+cleaner, EXIF data scrubber, bulk EXIF remove, image metadata
+editor, remove location from photo">
+
+<meta property="og:title" content="Image MetaData Removal Tool
+— Strip EXIF Data & Protect Your Privacy">
+
+<meta property="og:description" content="See exactly what's
+hiding in your photos — then remove it. GPS, camera model,
+timestamps, serial numbers. Free, no signup, files deleted
+instantly after download.">
+
+
+----------------------------------------------------------------
+APP STORE / DIRECTORY LISTING (under 80 words)
+----------------------------------------------------------------
+Free tool that detects and removes hidden EXIF metadata from
+JPG, PNG, and WebP images. Features include GPS location
+removal, privacy risk scoring, custom field editor, format
+conversion, batch processing with ZIP download, interactive
+GPS map, and CSV metadata export. No account required. Files
+are permanently deleted from the server immediately after
+download. Nothing is stored or logged.
+
+Category: Privacy & Security / Developer Tools
+Rating: Free
+
+
+================================================================
+END OF DOCUMENT
+================================================================
