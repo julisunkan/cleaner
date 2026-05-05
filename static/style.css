@@ -390,6 +390,118 @@ body {
 .mt-4 { margin-top: 16px; }
 .error-box { background: #450a0a; border: 1px solid #dc2626; border-radius: 8px; padding: 14px 18px; color: #fca5a5; font-size: .9rem; }
 
+/* ── Session History ── */
+.hist-header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: 12px;
+  margin-bottom: 20px;
+}
+
+#historyList {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.hist-item {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  background: var(--surface2);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  padding: 12px 14px;
+  transition: border-color .18s;
+}
+.hist-item:hover { border-color: var(--primary); }
+
+.hist-thumb {
+  width: 56px;
+  height: 56px;
+  object-fit: cover;
+  border-radius: 7px;
+  flex-shrink: 0;
+  background: var(--bg);
+  border: 1px solid var(--border);
+}
+.hist-thumb-bulk {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 1.6rem;
+  color: var(--muted);
+}
+
+.hist-info {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+.hist-name {
+  font-weight: 600;
+  font-size: .9rem;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.hist-meta {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 10px;
+  font-size: .8rem;
+  color: var(--muted);
+}
+.hist-saved { color: var(--success); font-weight: 600; }
+.hist-time  { color: var(--muted); }
+
+.hist-badges { display: flex; gap: 6px; flex-wrap: wrap; }
+
+.hist-bulk-badge {
+  display: inline-flex;
+  align-items: center;
+  padding: 3px 10px;
+  border-radius: 99px;
+  font-size: .72rem;
+  font-weight: 700;
+  background: #1e3a5f;
+  color: #93c5fd;
+  border: 1px solid #3b82f6;
+}
+
+.hist-dl-btn {
+  flex-shrink: 0;
+  font-size: .82rem;
+  padding: 8px 14px;
+  white-space: nowrap;
+}
+
+.hist-remove {
+  background: none;
+  border: none;
+  color: var(--muted);
+  cursor: pointer;
+  font-size: 1rem;
+  padding: 4px 6px;
+  border-radius: 4px;
+  flex-shrink: 0;
+  transition: color .15s, background .15s;
+}
+.hist-remove:hover { color: var(--danger); background: #7f1d1d40; }
+
+.history-saved-note {
+  margin-top: 12px;
+  font-size: .82rem;
+  color: var(--muted);
+  text-align: center;
+}
+.history-saved-note strong { color: var(--primary); }
+
 /* ── Scrollbar ── */
 ::-webkit-scrollbar { width: 6px; }
 ::-webkit-scrollbar-track { background: var(--bg); }

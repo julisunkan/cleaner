@@ -69,6 +69,18 @@
     <!-- Results Area -->
     <div id="resultsArea"></div>
 
+    <!-- Session History -->
+    <section id="historySection" class="card hidden">
+      <div class="hist-header">
+        <div>
+          <h2 class="section-title">📋 Session History</h2>
+          <p class="section-sub">Files are kept in your browser until you leave or clear the list</p>
+        </div>
+        <button class="btn btn-ghost" onclick="clearHistory()">🗑️ Clear All</button>
+      </div>
+      <div id="historyList"></div>
+    </section>
+
   </main>
 
   <footer class="footer">

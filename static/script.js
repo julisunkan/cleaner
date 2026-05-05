@@ -1,24 +1,27 @@
 'use strict';
 
 /* ── State ─────────────────────────────────────── */
-let selectedFiles   = [];   // File objects
-let uploadedResults = [];   // server response objects
-let cleanMode = 'all';
+let selectedFiles   = [];
+let uploadedResults = [];
+let cleanMode       = 'all';
+let sessionHistory  = [];   // { type, name, size, bytesSaved, risk, preview, blobUrl, filename, timestamp }
 
 /* ── DOM refs ──────────────────────────────────── */
-const dropZone      = document.getElementById('dropZone');
-const fileInput     = document.getElementById('fileInput');
-const fileQueue     = document.getElementById('fileQueue');
-const optionsRow    = document.getElementById('optionsRow');
-const processBtn    = document.getElementById('processBtn');
-const progressWrap  = document.getElementById('progressBar');
-const progressFill  = document.getElementById('progressFill');
-const progressLabel = document.getElementById('progressLabel');
-const resultsArea   = document.getElementById('resultsArea');
-const compressCheck = document.getElementById('compressCheck');
-const qualityGroup  = document.getElementById('qualityGroup');
-const qualitySlider = document.getElementById('qualitySlider');
-const qualityVal    = document.getElementById('qualityVal');
+const dropZone       = document.getElementById('dropZone');
+const fileInput      = document.getElementById('fileInput');
+const fileQueue      = document.getElementById('fileQueue');
+const optionsRow     = document.getElementById('optionsRow');
+const processBtn     = document.getElementById('processBtn');
+const progressWrap   = document.getElementById('progressBar');
+const progressFill   = document.getElementById('progressFill');
+const progressLabel  = document.getElementById('progressLabel');
+const resultsArea    = document.getElementById('resultsArea');
+const compressCheck  = document.getElementById('compressCheck');
+const qualityGroup   = document.getElementById('qualityGroup');
+const qualitySlider  = document.getElementById('qualitySlider');
+const qualityVal     = document.getElementById('qualityVal');
+const historySection = document.getElementById('historySection');
+const historyList    = document.getElementById('historyList');
 
 /* ── Helpers ────────────────────────────────────── */
 function fmtBytes(b) {
@@ -27,14 +30,9 @@ function fmtBytes(b) {
   return `${(b/1048576).toFixed(2)} MB`;
 }
 
-function fmtCountdown(remainSecs) {
-  if (!remainSecs || remainSecs <= 0) return 'Expired';
-  const d = Math.floor(remainSecs / 86400);
-  const h = Math.floor((remainSecs % 86400) / 3600);
-  const m = Math.floor((remainSecs % 3600) / 60);
-  if (d > 0) return `${d}d ${h}h`;
-  if (h > 0) return `${h}h ${m}m`;
-  return `${m}m`;
+function fmtTime(ts) {
+  const d = new Date(ts);
+  return d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
 }
 
 function setProgress(pct, label) {
@@ -132,11 +130,10 @@ async function processImages() {
   uploadedResults = [];
 
   try {
-    // Step 1: Upload all files
     const fd = new FormData();
     selectedFiles.forEach(f => fd.append('images', f));
     setProgress(20, `Uploading ${selectedFiles.length} image(s)…`);
-    const uploadRes = await fetch('/upload', { method: 'POST', body: fd });
+    const uploadRes  = await fetch('/upload', { method: 'POST', body: fd });
     const uploadData = await uploadRes.json();
 
     setProgress(40, 'Analyzing metadata…');
@@ -153,8 +150,7 @@ async function processImages() {
 
     uploadedResults = items;
 
-    // Step 2: Clean each file
-    const quality   = parseInt(qualitySlider.value);
+    const quality    = parseInt(qualitySlider.value);
     const doCompress = compressCheck.checked;
 
     if (items.length > 1) {
@@ -176,7 +172,7 @@ async function processImages() {
 async function processSingle(item, quality, doCompress) {
   if (item.error) { showError(item.error); return; }
 
-  setProgress(65, 'Removing metadata…');
+  setProgress(55, 'Removing metadata…');
   const cleanRes = await fetch('/clean', {
     method: 'POST',
     headers: {'Content-Type':'application/json'},
@@ -188,16 +184,33 @@ async function processSingle(item, quality, doCompress) {
     })
   });
   const cleanData = await cleanRes.json();
-  setProgress(90, 'Building result…');
-
   if (cleanData.error) { showError(cleanData.error); return; }
 
+  // Fetch the cleaned file into memory — this also triggers server-side deletion
+  setProgress(80, 'Saving to session…');
+  const blobRes = await fetch('/download/' + encodeURIComponent(cleanData.cleaned_filename));
+  const blob    = await blobRes.blob();
+  const blobUrl = URL.createObjectURL(blob);
+
+  sessionHistory.unshift({
+    type:      'single',
+    name:      item.original_name || item.filename,
+    size:      cleanData.cleaned_size,
+    bytesSaved: cleanData.bytes_saved || 0,
+    risk:      item.risk || {},
+    preview:   cleanData.cleaned_preview_b64 || '',
+    blobUrl,
+    filename:  cleanData.cleaned_filename,
+    timestamp: Date.now(),
+  });
+
   setProgress(100, 'Done!');
-  renderSingleResult(item, cleanData);
+  renderSingleResult(item, cleanData, blobUrl);
+  renderHistory();
 }
 
 async function processBulk(items, quality, doCompress) {
-  setProgress(60, `Cleaning ${items.length} images…`);
+  setProgress(50, `Cleaning ${items.length} images…`);
   const validItems = items.filter(i => !i.error);
   const zipRes = await fetch('/bulk-clean', {
     method: 'POST',
@@ -208,29 +221,46 @@ async function processBulk(items, quality, doCompress) {
     })
   });
   const zipData = await zipRes.json();
-  setProgress(100, 'Done!');
-
   if (zipData.error) { showError(zipData.error); return; }
 
-  renderBulkResult(items, zipData);
+  // Fetch zip blob into memory
+  setProgress(85, 'Saving to session…');
+  const zipBlobRes = await fetch('/download-zip/' + encodeURIComponent(zipData.zip_filename));
+  const zipBlob    = await zipBlobRes.blob();
+  const zipBlobUrl = URL.createObjectURL(zipBlob);
+
+  sessionHistory.unshift({
+    type:      'bulk',
+    name:      `Batch — ${validItems.length} image${validItems.length !== 1 ? 's' : ''}`,
+    size:      zipBlob.size,
+    bytesSaved: 0,
+    risk:      {},
+    preview:   '',
+    blobUrl:   zipBlobUrl,
+    filename:  zipData.zip_filename,
+    timestamp: Date.now(),
+  });
+
+  setProgress(100, 'Done!');
+  renderBulkResult(items, zipBlobUrl);
+  renderHistory();
 }
 
 /* ── Render Single ──────────────────────────────── */
-function renderSingleResult(item, cleanData) {
+function renderSingleResult(item, cleanData, blobUrl) {
   const risk     = item.risk || {};
   const meta     = item.metadata || {};
   const afterMeta= cleanData.after_metadata || {};
   const gps      = item.gps;
 
-  const metaKeys      = Object.keys(meta).filter(k => k !== 'image_info' && k !== '_error');
-  const metaCount     = metaKeys.length;
-  const afterCount    = Object.keys(afterMeta).filter(k => k !== 'image_info' && k !== '_error').length;
-  const removedCount  = Math.max(0, metaCount - afterCount);
-  const bytesSaved    = cleanData.bytes_saved || 0;
+  const metaKeys     = Object.keys(meta).filter(k => k !== 'image_info' && k !== '_error');
+  const metaCount    = metaKeys.length;
+  const afterCount   = Object.keys(afterMeta).filter(k => k !== 'image_info' && k !== '_error').length;
+  const removedCount = Math.max(0, metaCount - afterCount);
+  const bytesSaved   = cleanData.bytes_saved || 0;
 
-  const riskBarColor  = risk.level === 'HIGH' ? '#ef4444' : risk.level === 'MEDIUM' ? '#f59e0b' : '#10b981';
+  const riskBarColor = risk.level === 'HIGH' ? '#ef4444' : risk.level === 'MEDIUM' ? '#f59e0b' : '#10b981';
 
-  // GPS HTML
   let gpsHtml = '';
   if (gps) {
     gpsHtml = `
@@ -248,7 +278,6 @@ function renderSingleResult(item, cleanData) {
       </div>`;
   }
 
-  // Metadata table
   let metaHtml = '';
   if (metaKeys.length === 0) {
     metaHtml = '<p class="meta-empty">✅ No metadata found in this image</p>';
@@ -268,13 +297,11 @@ function renderSingleResult(item, cleanData) {
     </table>`;
   }
 
-  // Both previews are base64 — originals already deleted, download link serves and deletes the real file
   const origSrc    = item.preview_b64 || '';
   const cleanedSrc = cleanData.cleaned_preview_b64 || '';
 
   resultsArea.innerHTML = `
     <div class="result-card">
-      <!-- Header -->
       <div class="card">
         <div class="result-header">
           <div>
@@ -283,48 +310,32 @@ function renderSingleResult(item, cleanData) {
           </div>
           <span class="risk-badge risk-${risk.level || 'LOW'}">${risk.badge || ''} ${risk.level || 'LOW'} Risk</span>
         </div>
-
-        <!-- Risk bar -->
         <div class="risk-bar-wrap">
           <div class="risk-bar"><div class="risk-bar-fill" style="width:${risk.score||0}%;background:${riskBarColor}"></div></div>
           <p class="risk-desc mt-4">${escHtml(risk.description || '')}</p>
           ${risk.factors && risk.factors.length ? `<div class="risk-factors">${risk.factors.map(f=>`<span class="risk-factor">⚠️ ${escHtml(f)}</span>`).join('')}</div>` : ''}
         </div>
-
-        <!-- Savings -->
         <div class="savings-row mt-4">
           <div class="saving-item"><span class="saving-val">${removedCount}</span><span class="saving-lbl">Fields Removed</span></div>
           <div class="saving-item"><span class="saving-val">${bytesSaved >= 0 ? '+' : ''}${fmtBytes(Math.abs(bytesSaved))}</span><span class="saving-lbl">${bytesSaved >= 0 ? 'Bytes Saved' : 'Size Change'}</span></div>
           <div class="saving-item"><span class="saving-val">${cleanMode === 'all' ? '100%' : 'GPS'}</span><span class="saving-lbl">Metadata Cleared</span></div>
         </div>
-
-        <!-- Actions -->
         <div class="actions-row mt-4">
-          <a class="btn btn-success" href="/download/${encodeURIComponent(cleanData.cleaned_filename)}" id="dlBtn">⬇️ Download Clean Image</a>
-          <span class="countdown-badge">🗑️ File deleted <strong>after download</strong></span>
+          <a class="btn btn-success" href="${blobUrl}" download="${escHtml(cleanData.cleaned_filename)}">⬇️ Download Clean Image</a>
+          <span class="countdown-badge">📋 Saved to <strong>session history</strong> below</span>
         </div>
       </div>
-
-      <!-- GPS -->
       ${gpsHtml}
-
-      <!-- Comparison Slider -->
       <div class="card">
         <div class="compare-section">
           <h3>🔍 Before vs After</h3>
           <p class="compare-hint">← Drag the handle to reveal original vs cleaned →</p>
           <div class="compare-slider" id="compareSlider">
-            <!-- After (cleaned) — full width base layer -->
             <img class="cs-after" src="${cleanedSrc}" alt="Cleaned" draggable="false">
-            <!-- Before (original) — clipped left portion -->
             <div class="cs-before-wrap" id="csBefore">
               <img class="cs-before" id="csBeforeImg" src="${origSrc}" alt="Original" draggable="false">
             </div>
-            <!-- Divider handle -->
-            <div class="cs-handle" id="csHandle">
-              <div class="cs-knob">⟺</div>
-            </div>
-            <!-- Labels -->
+            <div class="cs-handle" id="csHandle"><div class="cs-knob">⟺</div></div>
             <span class="cs-label cs-label-left">Original</span>
             <span class="cs-label cs-label-right">Cleaned</span>
           </div>
@@ -335,8 +346,6 @@ function renderSingleResult(item, cleanData) {
           </div>
         </div>
       </div>
-
-      <!-- Metadata -->
       <div class="card">
         <div class="meta-section">
           <h3>📋 Metadata Details (${metaCount} fields detected)</h3>
@@ -345,29 +354,15 @@ function renderSingleResult(item, cleanData) {
       </div>
     </div>`;
 
-  // Init the drag-to-compare slider
   initCompareSlider();
-
-  // Disable download button after first click (file is gone after one download)
-  const dlBtn = resultsArea.querySelector('#dlBtn');
-  if (dlBtn) {
-    dlBtn.addEventListener('click', () => {
-      setTimeout(() => {
-        dlBtn.textContent = '✅ Downloaded & Deleted';
-        dlBtn.classList.remove('btn-success');
-        dlBtn.classList.add('btn-ghost');
-        dlBtn.style.pointerEvents = 'none';
-      }, 1500);
-    });
-  }
 }
 
 /* ── Compare Slider ──────────────────────────────── */
 function initCompareSlider() {
-  const slider   = document.getElementById('compareSlider');
-  const before   = document.getElementById('csBefore');
-  const beforeImg= document.getElementById('csBeforeImg');
-  const handle   = document.getElementById('csHandle');
+  const slider    = document.getElementById('compareSlider');
+  const before    = document.getElementById('csBefore');
+  const beforeImg = document.getElementById('csBeforeImg');
+  const handle    = document.getElementById('csHandle');
   if (!slider || !before || !handle) return;
 
   let dragging = false;
@@ -377,29 +372,24 @@ function initCompareSlider() {
     let pct = (clientX - rect.left) / rect.width;
     pct = Math.max(0.02, Math.min(0.98, pct));
     const pctPx = (pct * 100).toFixed(2) + '%';
-    // Clip the before-wrap to pct width; stretch the inner img to full slider width
     before.style.width = pctPx;
     beforeImg.style.width = rect.width + 'px';
     handle.style.left = pctPx;
   }
 
-  // Initialise at 50 %
   requestAnimationFrame(() => {
     const rect = slider.getBoundingClientRect();
     beforeImg.style.width = rect.width + 'px';
   });
 
-  // Mouse
   slider.addEventListener('mousedown', e => { dragging = true; setPosition(e.clientX); });
   window.addEventListener('mousemove', e => { if (dragging) setPosition(e.clientX); });
   window.addEventListener('mouseup',   () => { dragging = false; });
 
-  // Touch
   slider.addEventListener('touchstart', e => { dragging = true; setPosition(e.touches[0].clientX); }, { passive: true });
   window.addEventListener('touchmove',  e => { if (dragging) setPosition(e.touches[0].clientX); }, { passive: true });
   window.addEventListener('touchend',   () => { dragging = false; });
 
-  // Resize: keep before-img in sync
   window.addEventListener('resize', () => {
     const rect = slider.getBoundingClientRect();
     beforeImg.style.width = rect.width + 'px';
@@ -407,7 +397,7 @@ function initCompareSlider() {
 }
 
 /* ── Render Bulk ─────────────────────────────────── */
-function renderBulkResult(items, zipData) {
+function renderBulkResult(items, zipBlobUrl) {
   const validCount  = items.filter(i => !i.error).length;
   const failedCount = items.filter(i =>  i.error).length;
 
@@ -435,11 +425,66 @@ function renderBulkResult(items, zipData) {
       <div class="bulk-summary">
         <div class="bulk-stat">Processed: <strong>${validCount}</strong></div>
         ${failedCount ? `<div class="bulk-stat text-danger">Failed: <strong>${failedCount}</strong></div>` : ''}
-        <a class="btn btn-success" href="/download-zip/${encodeURIComponent(zipData.zip_filename)}">⬇️ Download All (ZIP)</a>
+        <a class="btn btn-success" href="${zipBlobUrl}" download="cleaned_batch.zip">⬇️ Download All (ZIP)</a>
       </div>
       <div class="file-queue" style="display:flex;flex-direction:column;gap:8px;">${rows}</div>
+      <p class="history-saved-note">📋 Saved to <strong>session history</strong> below</p>
     </div>`;
 }
+
+/* ── Session History ─────────────────────────────── */
+function renderHistory() {
+  if (!sessionHistory.length) {
+    historySection.classList.add('hidden');
+    return;
+  }
+
+  historySection.classList.remove('hidden');
+
+  historyList.innerHTML = sessionHistory.map((entry, i) => {
+    const riskLevel = entry.risk.level || 'LOW';
+    const isBulk    = entry.type === 'bulk';
+
+    const thumb = entry.preview
+      ? `<img class="hist-thumb" src="${entry.preview}" alt="preview">`
+      : `<div class="hist-thumb hist-thumb-bulk">🗜️</div>`;
+
+    const badge = !isBulk
+      ? `<span class="risk-badge risk-${riskLevel}" style="font-size:.72rem;padding:3px 10px;">${entry.risk.badge || ''} ${riskLevel}</span>`
+      : `<span class="hist-bulk-badge">ZIP</span>`;
+
+    const savings = entry.bytesSaved > 0
+      ? `<span class="hist-saved">+${fmtBytes(entry.bytesSaved)} saved</span>`
+      : '';
+
+    return `
+      <div class="hist-item">
+        ${thumb}
+        <div class="hist-info">
+          <div class="hist-name">${escHtml(entry.name)}</div>
+          <div class="hist-meta">
+            ${fmtBytes(entry.size)} ${savings}
+            <span class="hist-time">🕐 ${fmtTime(entry.timestamp)}</span>
+          </div>
+          <div class="hist-badges">${badge}</div>
+        </div>
+        <a class="btn btn-ghost hist-dl-btn" href="${entry.blobUrl}" download="${escHtml(entry.filename)}">⬇️ Re-download</a>
+        <button class="hist-remove" onclick="removeHistory(${i})" title="Remove from history">✕</button>
+      </div>`;
+  }).join('');
+}
+
+window.removeHistory = function(i) {
+  URL.revokeObjectURL(sessionHistory[i].blobUrl);
+  sessionHistory.splice(i, 1);
+  renderHistory();
+};
+
+window.clearHistory = function() {
+  sessionHistory.forEach(e => URL.revokeObjectURL(e.blobUrl));
+  sessionHistory = [];
+  renderHistory();
+};
 
 /* ── Error ───────────────────────────────────────── */
 function showError(msg) {
