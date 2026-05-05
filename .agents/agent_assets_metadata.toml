@@ -1,0 +1,8 @@
+uploads = []
+outputs = []
+
+[[generated]]
+id = "QUJgyVD_RlhY8x5h-LUaX"
+uri = "file://attached_assets/generated_images/metacleaner-icon-source.png"
+type = "image"
+title = "generated_image"
