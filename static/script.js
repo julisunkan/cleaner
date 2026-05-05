@@ -218,7 +218,6 @@ function renderSingleResult(item, cleanData) {
   const meta     = item.metadata || {};
   const afterMeta= cleanData.after_metadata || {};
   const gps      = item.gps;
-  const expiry   = cleanData.expiry;
 
   const metaKeys      = Object.keys(meta).filter(k => k !== 'image_info' && k !== '_error');
   const metaCount     = metaKeys.length;
@@ -266,11 +265,9 @@ function renderSingleResult(item, cleanData) {
     </table>`;
   }
 
-  // Image compare
-  const origSrc    = `/download-original/${encodeURIComponent(item.filename)}`;
-  const cleanedSrc = `/download/${encodeURIComponent(cleanData.cleaned_filename)}`;
-
-  const countdownStr = expiry ? fmtCountdown(expiry.remaining_seconds) : '3 days';
+  // Both previews are base64 — originals already deleted, download link serves and deletes the real file
+  const origSrc    = item.preview_b64 || '';
+  const cleanedSrc = cleanData.cleaned_preview_b64 || '';
 
   resultsArea.innerHTML = `
     <div class="result-card">
@@ -308,21 +305,30 @@ function renderSingleResult(item, cleanData) {
       <!-- GPS -->
       ${gpsHtml}
 
-      <!-- Comparison -->
+      <!-- Comparison Slider -->
       <div class="card">
         <div class="compare-section">
           <h3>🔍 Before vs After</h3>
-          <div class="compare-grid">
-            <div class="compare-col">
-              <span class="compare-label">Original</span>
-              <img src="${origSrc}" class="compare-img" alt="Original" loading="lazy">
-              <p class="compare-stat"><strong>${fmtBytes(item.original_size)}</strong> · ${metaCount} metadata fields</p>
+          <p class="compare-hint">← Drag the handle to reveal original vs cleaned →</p>
+          <div class="compare-slider" id="compareSlider">
+            <!-- After (cleaned) — full width base layer -->
+            <img class="cs-after" src="${cleanedSrc}" alt="Cleaned" draggable="false">
+            <!-- Before (original) — clipped left portion -->
+            <div class="cs-before-wrap" id="csBefore">
+              <img class="cs-before" id="csBeforeImg" src="${origSrc}" alt="Original" draggable="false">
             </div>
-            <div class="compare-col">
-              <span class="compare-label">Cleaned</span>
-              <img src="${cleanedSrc}" class="compare-img" alt="Cleaned" loading="lazy">
-              <p class="compare-stat"><strong>${fmtBytes(cleanData.cleaned_size)}</strong> · ${afterCount} metadata fields</p>
+            <!-- Divider handle -->
+            <div class="cs-handle" id="csHandle">
+              <div class="cs-knob">⟺</div>
             </div>
+            <!-- Labels -->
+            <span class="cs-label cs-label-left">Original</span>
+            <span class="cs-label cs-label-right">Cleaned</span>
+          </div>
+          <div class="compare-stats">
+            <span>Original: <strong>${fmtBytes(item.original_size)}</strong> · ${metaCount} metadata fields</span>
+            <span>Cleaned: <strong>${fmtBytes(cleanData.cleaned_size)}</strong> · ${afterCount} fields</span>
+            ${bytesSaved > 0 ? `<span>Saved: <strong class="text-success">${fmtBytes(bytesSaved)}</strong></span>` : ''}
           </div>
         </div>
       </div>
@@ -336,6 +342,9 @@ function renderSingleResult(item, cleanData) {
       </div>
     </div>`;
 
+  // Init the drag-to-compare slider
+  initCompareSlider();
+
   // Disable download button after first click (file is gone after one download)
   const dlBtn = resultsArea.querySelector('#dlBtn');
   if (dlBtn) {
@@ -348,6 +357,50 @@ function renderSingleResult(item, cleanData) {
       }, 1500);
     });
   }
+}
+
+/* ── Compare Slider ──────────────────────────────── */
+function initCompareSlider() {
+  const slider   = document.getElementById('compareSlider');
+  const before   = document.getElementById('csBefore');
+  const beforeImg= document.getElementById('csBeforeImg');
+  const handle   = document.getElementById('csHandle');
+  if (!slider || !before || !handle) return;
+
+  let dragging = false;
+
+  function setPosition(clientX) {
+    const rect = slider.getBoundingClientRect();
+    let pct = (clientX - rect.left) / rect.width;
+    pct = Math.max(0.02, Math.min(0.98, pct));
+    const pctPx = (pct * 100).toFixed(2) + '%';
+    // Clip the before-wrap to pct width; stretch the inner img to full slider width
+    before.style.width = pctPx;
+    beforeImg.style.width = rect.width + 'px';
+    handle.style.left = pctPx;
+  }
+
+  // Initialise at 50 %
+  requestAnimationFrame(() => {
+    const rect = slider.getBoundingClientRect();
+    beforeImg.style.width = rect.width + 'px';
+  });
+
+  // Mouse
+  slider.addEventListener('mousedown', e => { dragging = true; setPosition(e.clientX); });
+  window.addEventListener('mousemove', e => { if (dragging) setPosition(e.clientX); });
+  window.addEventListener('mouseup',   () => { dragging = false; });
+
+  // Touch
+  slider.addEventListener('touchstart', e => { dragging = true; setPosition(e.touches[0].clientX); }, { passive: true });
+  window.addEventListener('touchmove',  e => { if (dragging) setPosition(e.touches[0].clientX); }, { passive: true });
+  window.addEventListener('touchend',   () => { dragging = false; });
+
+  // Resize: keep before-img in sync
+  window.addEventListener('resize', () => {
+    const rect = slider.getBoundingClientRect();
+    beforeImg.style.width = rect.width + 'px';
+  });
 }
 
 /* ── Render Bulk ─────────────────────────────────── */

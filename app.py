@@ -15,6 +15,7 @@ from utils.cleaner import remove_all_metadata, remove_gps_only
 from utils.compressor import compress_image
 from utils.zip_utils import create_zip
 from utils.cleanup import purge_old_files
+from utils.preview import get_preview_b64
 
 logging.basicConfig(level=logging.INFO)
 
@@ -116,7 +117,8 @@ def upload():
             address = None
             if gps:
                 address = reverse_geocode(gps["lat"], gps["lon"])
-            risk = calculate_risk_score(metadata)
+            risk       = calculate_risk_score(metadata)
+            preview_b64 = get_preview_b64(path)
             results.append({
                 "uid": uid,
                 "original_name": secure_filename(f.filename),
@@ -126,6 +128,7 @@ def upload():
                 "gps": gps,
                 "address": address,
                 "risk": risk,
+                "preview_b64": preview_b64,
             })
         except Exception as e:
             results.append({"error": str(e)})
@@ -165,9 +168,10 @@ def clean():
         else:
             remove_all_metadata(input_path, out_path, quality=quality)
 
-        original_size = os.path.getsize(input_path)
-        cleaned_size  = os.path.getsize(out_path)
-        after_meta    = extract_metadata(out_path)
+        original_size    = os.path.getsize(input_path)
+        cleaned_size     = os.path.getsize(out_path)
+        after_meta       = extract_metadata(out_path)
+        cleaned_preview  = get_preview_b64(out_path)
 
         # Upload no longer needed — delete it now
         _silent_delete(input_path)
@@ -178,6 +182,7 @@ def clean():
             "cleaned_size": cleaned_size,
             "bytes_saved": original_size - cleaned_size,
             "after_metadata": after_meta,
+            "cleaned_preview_b64": cleaned_preview,
         })
     except Exception as e:
         _silent_delete(input_path, out_path)

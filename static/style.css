@@ -227,20 +227,109 @@ body {
 .map-frame       { width: 100%; height: 300px; border: none; border-radius: 8px; }
 .map-no-gps      { color: var(--success); font-size: .9rem; }
 
-/* ── Comparison ── */
-.compare-section h3 { font-size: 1rem; font-weight: 700; margin-bottom: 16px; }
-.compare-grid {
-  display: grid;
-  grid-template-columns: 1fr 1fr;
-  gap: 16px;
-}
-@media (max-width: 600px) { .compare-grid { grid-template-columns: 1fr; } }
+/* ── Comparison Slider ── */
+.compare-section h3 { font-size: 1rem; font-weight: 700; margin-bottom: 6px; }
+.compare-hint { font-size: .82rem; color: var(--muted); margin-bottom: 16px; }
 
-.compare-col { display: flex; flex-direction: column; gap: 10px; }
-.compare-label { font-size: .8rem; font-weight: 700; text-transform: uppercase; letter-spacing: .05em; color: var(--muted); }
-.compare-img { width: 100%; border-radius: 8px; object-fit: contain; max-height: 260px; background: #000; border: 1px solid var(--border); }
-.compare-stat { font-size: .85rem; color: var(--muted); }
-.compare-stat strong { color: var(--text); }
+.compare-slider {
+  position: relative;
+  width: 100%;
+  max-height: 380px;
+  border-radius: 10px;
+  overflow: hidden;
+  cursor: ew-resize;
+  border: 1px solid var(--border);
+  background: #000;
+  user-select: none;
+  touch-action: none;
+}
+
+/* After (cleaned) image — sits full width behind everything */
+.cs-after {
+  display: block;
+  width: 100%;
+  max-height: 380px;
+  object-fit: contain;
+  pointer-events: none;
+}
+
+/* Before (original) image — clipped to left portion via clip-path */
+.cs-before-wrap {
+  position: absolute;
+  inset: 0;
+  overflow: hidden;
+  width: 50%;           /* JS updates this */
+}
+.cs-before {
+  display: block;
+  width: 100%;          /* fill the outer slider width, not the clip wrapper */
+  max-height: 380px;
+  object-fit: contain;
+  pointer-events: none;
+  position: absolute;
+  top: 0;
+  left: 0;
+}
+/* Make before image same intrinsic size as after */
+.compare-slider .cs-before { width: var(--slider-w, 100%); }
+
+/* Divider handle */
+.cs-handle {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  left: 50%;            /* JS updates this */
+  width: 3px;
+  background: #fff;
+  transform: translateX(-50%);
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  pointer-events: none;
+  filter: drop-shadow(0 0 4px rgba(0,0,0,.6));
+}
+.cs-knob {
+  width: 40px;
+  height: 40px;
+  border-radius: 50%;
+  background: #fff;
+  border: 3px solid var(--primary);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 1.1rem;
+  color: var(--primary);
+  box-shadow: 0 2px 12px rgba(0,0,0,.5);
+  pointer-events: none;
+  flex-shrink: 0;
+}
+
+/* Corner labels */
+.cs-label {
+  position: absolute;
+  top: 10px;
+  padding: 3px 10px;
+  border-radius: 99px;
+  font-size: .72rem;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: .06em;
+  pointer-events: none;
+}
+.cs-label-left  { left: 10px;  background: rgba(0,0,0,.65); color: #fca5a5; }
+.cs-label-right { right: 10px; background: rgba(0,0,0,.65); color: #6ee7b7; }
+
+/* Stats row under slider */
+.compare-stats {
+  display: flex;
+  gap: 24px;
+  flex-wrap: wrap;
+  margin-top: 12px;
+  font-size: .84rem;
+  color: var(--muted);
+}
+.compare-stats strong { color: var(--text); }
 
 .savings-row {
   display: flex;
