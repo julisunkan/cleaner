@@ -331,7 +331,7 @@ async function processBulk(items, quality, doCompress, originals = [], fieldsToR
 
 /* ── Custom Editor ──────────────────────────────── */
 function showCustomEditor(items) {
-  const item   = items[0];
+  const item   = items.find(i => !i.error) || items[0];
   const fields = item.metadata_fields || [];
 
   if (!fields.length) {

@@ -38,11 +38,11 @@ def delete_file(filepath):
     return False
 
 
-def get_file_expiry_info(filepath):
+def get_file_expiry_info(filepath, max_age_seconds=DEFAULT_MAX_AGE):
     try:
         mtime = os.path.getmtime(filepath)
         age = time.time() - mtime
-        remaining = MAX_AGE_SECONDS - age
+        remaining = max_age_seconds - age
         return {
             "created_ts": mtime,
             "remaining_seconds": max(0, int(remaining)),

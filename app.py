@@ -1,5 +1,4 @@
 import os
-import io
 import uuid
 import logging
 import mimetypes
@@ -103,7 +102,7 @@ def _output_ext(src_fname, output_format):
     """Return the file extension to use for the cleaned output."""
     src_ext = src_fname.rsplit(".", 1)[1].lower()
     if output_format and output_format.lower() not in ("same", ""):
-        return {"jpeg": "jpg", "png": "png", "webp": "webp"}.get(output_format.lower(), src_ext)
+        return {"jpeg": "jpg", "jpg": "jpg", "png": "png", "webp": "webp"}.get(output_format.lower(), src_ext)
     return src_ext
 
 
@@ -203,14 +202,20 @@ def clean():
         if compress:
             compress_image(input_path, out_path, quality=quality, remove_meta=(mode == "all"))
             if mode == "gps":
-                remove_gps_only(out_path, out_path, quality=quality,
+                tmp_path = out_path + ".tmp"
+                remove_gps_only(out_path, tmp_path, quality=quality,
                                 output_format=output_format, max_width=max_width)
+                os.replace(tmp_path, out_path)
             elif mode == "custom":
-                remove_custom_fields(out_path, out_path, fields_to_remove=fields_to_remove,
+                tmp_path = out_path + ".tmp"
+                remove_custom_fields(out_path, tmp_path, fields_to_remove=fields_to_remove,
                                      quality=quality, output_format=output_format, max_width=max_width)
+                os.replace(tmp_path, out_path)
             elif output_format not in ("same", "") or max_width:
-                remove_all_metadata(out_path, out_path, quality=quality,
+                tmp_path = out_path + ".tmp"
+                remove_all_metadata(out_path, tmp_path, quality=quality,
                                     output_format=output_format, max_width=max_width)
+                os.replace(tmp_path, out_path)
         elif mode == "gps":
             remove_gps_only(input_path, out_path, quality=quality,
                             output_format=output_format, max_width=max_width)
@@ -284,14 +289,20 @@ def bulk_clean():
             if compress:
                 compress_image(input_path, out_path, quality=quality, remove_meta=(mode == "all"))
                 if mode == "gps":
-                    remove_gps_only(out_path, out_path, quality=quality,
+                    tmp_path = out_path + ".tmp"
+                    remove_gps_only(out_path, tmp_path, quality=quality,
                                     output_format=output_format, max_width=max_width)
+                    os.replace(tmp_path, out_path)
                 elif mode == "custom":
-                    remove_custom_fields(out_path, out_path, fields_to_remove=fields_to_remove,
+                    tmp_path = out_path + ".tmp"
+                    remove_custom_fields(out_path, tmp_path, fields_to_remove=fields_to_remove,
                                          quality=quality, output_format=output_format, max_width=max_width)
+                    os.replace(tmp_path, out_path)
                 elif output_format not in ("same", "") or max_width:
-                    remove_all_metadata(out_path, out_path, quality=quality,
+                    tmp_path = out_path + ".tmp"
+                    remove_all_metadata(out_path, tmp_path, quality=quality,
                                         output_format=output_format, max_width=max_width)
+                    os.replace(tmp_path, out_path)
             elif mode == "gps":
                 remove_gps_only(input_path, out_path, quality=quality,
                                 output_format=output_format, max_width=max_width)
