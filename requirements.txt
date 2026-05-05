@@ -11,3 +11,10 @@ gunicorn
 piexif
 pillow
 werkzeug
+apscheduler
+flask
+geopy
+gunicorn
+piexif
+pillow
+werkzeug
