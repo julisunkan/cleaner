@@ -467,6 +467,7 @@ function renderSingleResult(item, cleanData, blobUrl, original = null, fieldsToR
   const origSrc    = item.preview_b64 || '';
   const cleanedSrc = cleanData.cleaned_preview_b64 || '';
   const diffHtml   = renderDiffTable(meta, afterMeta, activeMode, fieldsToRemove || []);
+  const wmHtml     = renderWatermarkCard(item.watermark);
 
   resultsArea.innerHTML = `
     <div class="result-card">
@@ -495,6 +496,7 @@ function renderSingleResult(item, cleanData, blobUrl, original = null, fieldsToR
           <span class="countdown-badge">📋 Saved to <strong>session history</strong> below</span>
         </div>
       </div>
+      ${wmHtml}
       ${gpsHtml}
       <div class="card">
         <div class="compare-section">
@@ -525,6 +527,58 @@ function renderSingleResult(item, cleanData, blobUrl, original = null, fieldsToR
     </div>`;
 
   initCompareSlider();
+}
+
+/* ── Watermark Detection Card ───────────────────── */
+function renderWatermarkCard(wm) {
+  if (!wm) return '';
+
+  if (!wm.detected) {
+    return `
+      <div class="card wm-card wm-clean">
+        <div class="wm-header">
+          <span class="wm-icon">🔍</span>
+          <div>
+            <div class="wm-title">Watermark Detection</div>
+            <div class="wm-sub">No watermark patterns detected in this image</div>
+          </div>
+          <span class="wm-badge wm-badge-clean">✅ Clean</span>
+        </div>
+        <p class="wm-disclaimer">Heuristic scan — analyzes pixel patterns, alpha layers, and edge density.</p>
+      </div>`;
+  }
+
+  const levelClass = { HIGH: 'wm-badge-high', MEDIUM: 'wm-badge-medium', LOW: 'wm-badge-low' }[wm.confidence] || 'wm-badge-low';
+  const levelIcon  = { HIGH: '🚨', MEDIUM: '⚠️', LOW: '🔶' }[wm.confidence] || '🔶';
+
+  const bars = `
+    <div class="wm-score-bar">
+      <div class="wm-score-fill" style="width:${wm.score}%"></div>
+    </div>
+    <span class="wm-score-label">${wm.score}/100 confidence</span>`;
+
+  const indicators = wm.indicators.length
+    ? `<ul class="wm-indicators">${wm.indicators.map(i => `<li>${escHtml(i)}</li>`).join('')}</ul>`
+    : '';
+
+  return `
+    <div class="card wm-card wm-found">
+      <div class="wm-header">
+        <span class="wm-icon">${levelIcon}</span>
+        <div>
+          <div class="wm-title">Watermark Detection</div>
+          <div class="wm-sub">Possible watermark pattern found</div>
+        </div>
+        <span class="wm-badge ${levelClass}">${wm.confidence} Confidence</span>
+      </div>
+      ${bars}
+      ${indicators}
+      <div class="wm-notice">
+        ⚠️ <strong>Note:</strong> Metadata cleaning does <em>not</em> remove visual watermarks.
+        Watermarks are part of the image pixels and require separate image editing to remove.
+      </div>
+      <p class="wm-disclaimer">This is a heuristic scan — results may vary. Manual inspection is recommended.</p>
+    </div>`;
 }
 
 /* ── Side-by-Side Diff Table ───────────────────── */

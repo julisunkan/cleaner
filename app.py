@@ -12,6 +12,7 @@ from utils.metadata import extract_metadata, extract_metadata_fields
 from utils.gps import extract_gps_coordinates, reverse_geocode
 from utils.risk import calculate_risk_score
 from utils.cleaner import remove_all_metadata, remove_gps_only, remove_custom_fields
+from utils.watermark import detect_watermark
 from utils.compressor import compress_image
 from utils.zip_utils import create_zip
 from utils.cleanup import purge_old_files
@@ -151,7 +152,8 @@ def upload():
             address         = None
             if gps:
                 address = reverse_geocode(gps["lat"], gps["lon"])
-            risk        = calculate_risk_score(metadata)
+            risk       = calculate_risk_score(metadata)
+            watermark  = detect_watermark(path)
             preview_b64 = get_preview_b64(path)
             results.append({
                 "uid":             uid,
@@ -163,6 +165,7 @@ def upload():
                 "gps":             gps,
                 "address":         address,
                 "risk":            risk,
+                "watermark":       watermark,
                 "preview_b64":     preview_b64,
             })
         except Exception as e:
