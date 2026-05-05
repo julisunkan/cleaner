@@ -434,14 +434,18 @@ function renderBulkResult(items, zipBlobUrl) {
 
 /* ── Session History ─────────────────────────────── */
 function renderHistory() {
+  const histSec  = historySection  || document.getElementById('historySection');
+  const histList = historyList     || document.getElementById('historyList');
+  if (!histSec || !histList) return;
+
   if (!sessionHistory.length) {
-    historySection.classList.add('hidden');
+    histSec.classList.add('hidden');
     return;
   }
 
-  historySection.classList.remove('hidden');
+  histSec.classList.remove('hidden');
 
-  historyList.innerHTML = sessionHistory.map((entry, i) => {
+  histList.innerHTML = sessionHistory.map((entry, i) => {
     const riskLevel = entry.risk.level || 'LOW';
     const isBulk    = entry.type === 'bulk';
 
@@ -475,7 +479,7 @@ function renderHistory() {
 }
 
 window.removeHistory = function(i) {
-  URL.revokeObjectURL(sessionHistory[i].blobUrl);
+  if (sessionHistory[i]) URL.revokeObjectURL(sessionHistory[i].blobUrl);
   sessionHistory.splice(i, 1);
   renderHistory();
 };
