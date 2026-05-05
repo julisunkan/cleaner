@@ -55,7 +55,10 @@ function escHtml(s) {
 }
 
 /* ── File Selection ─────────────────────────────── */
-dropZone.addEventListener('click', () => fileInput.click());
+dropZone.addEventListener('click', e => {
+  if (e.target === fileInput || e.target.htmlFor === 'fileInput' || e.target.closest('label[for="fileInput"]')) return;
+  fileInput.click();
+});
 dropZone.addEventListener('dragover',  e => { e.preventDefault(); dropZone.classList.add('drag-over'); });
 dropZone.addEventListener('dragleave', () => dropZone.classList.remove('drag-over'));
 dropZone.addEventListener('drop', e => {
