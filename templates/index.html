@@ -1,0 +1,80 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Image Metadata Removal Tool</title>
+  <link rel="stylesheet" href="/static/style.css">
+  <link rel="manifest" href="/manifest.json">
+  <meta name="theme-color" content="#6366f1">
+  <meta name="description" content="Remove EXIF metadata from images to protect your privacy.">
+</head>
+<body>
+  <header class="header">
+    <div class="header-inner">
+      <div class="logo">
+        <span class="logo-icon">🛡️</span>
+        <span class="logo-text">MetaCleaner</span>
+      </div>
+      <p class="tagline">Remove image metadata. Protect your privacy.</p>
+    </div>
+  </header>
+
+  <main class="container">
+
+    <!-- Upload Zone -->
+    <section class="card upload-section" id="uploadSection">
+      <h2 class="section-title">Upload Images</h2>
+      <p class="section-sub">Supported: JPG, JPEG, PNG, WEBP · Max 10MB per file</p>
+
+      <div class="drop-zone" id="dropZone">
+        <div class="drop-icon">📂</div>
+        <p class="drop-label">Drag & drop images here</p>
+        <p class="drop-sub">or</p>
+        <label class="btn btn-primary" for="fileInput">Browse Files</label>
+        <input type="file" id="fileInput" accept=".jpg,.jpeg,.png,.webp" multiple hidden>
+      </div>
+
+      <div id="fileQueue" class="file-queue hidden"></div>
+
+      <!-- Options -->
+      <div class="options-row" id="optionsRow" style="display:none;">
+        <div class="option-group">
+          <label class="option-label">Removal Mode</label>
+          <div class="toggle-group">
+            <button class="toggle-btn active" data-mode="all" id="modeAll">Remove All Metadata</button>
+            <button class="toggle-btn" data-mode="gps" id="modeGps">GPS Only</button>
+          </div>
+        </div>
+        <div class="option-group">
+          <label class="option-label">
+            <input type="checkbox" id="compressCheck"> Enable Compression
+          </label>
+          <div id="qualityGroup" class="quality-group hidden">
+            <label class="option-label">Quality: <span id="qualityVal">85</span>%</label>
+            <input type="range" id="qualitySlider" min="50" max="95" value="85" class="slider">
+          </div>
+        </div>
+        <button class="btn btn-success btn-lg" id="processBtn">🧹 Clean & Process</button>
+      </div>
+
+      <div id="progressBar" class="progress-wrap hidden">
+        <div class="progress-bar">
+          <div class="progress-fill" id="progressFill"></div>
+        </div>
+        <p class="progress-label" id="progressLabel">Processing…</p>
+      </div>
+    </section>
+
+    <!-- Results Area -->
+    <div id="resultsArea"></div>
+
+  </main>
+
+  <footer class="footer">
+    <p>Files are automatically deleted after <strong>3 days</strong> · No data is stored permanently</p>
+  </footer>
+
+  <script src="/static/script.js"></script>
+</body>
+</html>
