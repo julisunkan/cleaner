@@ -1,4 +1,4 @@
-# Image Metadata Removal Tool
+# Image MetaData Removal Tool
 
 ## Overview
 A privacy-focused web app to detect and remove EXIF metadata from images (JPG, PNG, WEBP). Built with Flask, Pillow, piexif, geopy, and APScheduler.

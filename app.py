@@ -337,8 +337,8 @@ def api_clean():
 def manifest():
     import json
     data = {
-        "name": "Image Metadata Removal Tool",
-        "short_name": "MetaCleaner",
+        "name": "Image MetaData Removal Tool",
+        "short_name": "Image MetaData Removal Tool",
         "start_url": "/",
         "display": "standalone",
         "background_color": "#0f172a",
@@ -355,7 +355,7 @@ def manifest():
 @app.route("/sw.js")
 def service_worker():
     js = """
-const CACHE = 'metacleaner-v1';
+const CACHE = 'imgmeta-v2';
 const ASSETS = ['/', '/static/style.css', '/static/script.js'];
 self.addEventListener('install', e => {
   e.waitUntil(caches.open(CACHE).then(c => c.addAll(ASSETS)));
