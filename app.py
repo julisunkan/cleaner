@@ -392,6 +392,7 @@ def favicon():
 def manifest():
     import json
     data = {
+        "id": "image-metadata-removal-tool",
         "name": "Image MetaData Removal Tool",
         "short_name": "Image MetaData Removal Tool",
         "start_url": "/",
