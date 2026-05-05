@@ -26,11 +26,31 @@ os.makedirs(UPLOAD_DIR, exist_ok=True)
 os.makedirs(CLEANED_DIR, exist_ok=True)
 
 ALLOWED_EXTENSIONS = {"jpg", "jpeg", "png", "webp"}
-MAX_FILE_SIZE = 10 * 1024 * 1024  # 10 MB
+MAX_FILE_SIZE      = 10 * 1024 * 1024   # 10 MB per individual file (enforced in route)
+MAX_REQUEST_SIZE   = 60 * 1024 * 1024   # 60 MB total request (supports ~5 × 10 MB files)
 
 app = Flask(__name__)
 app.secret_key = os.environ.get("SESSION_SECRET", "img-meta-tool-2024")
-app.config["MAX_CONTENT_LENGTH"] = MAX_FILE_SIZE
+app.config["MAX_CONTENT_LENGTH"] = MAX_REQUEST_SIZE
+
+
+# ── JSON error handlers (so the frontend never gets an HTML error page) ───────
+@app.errorhandler(400)
+def bad_request(e):
+    return jsonify({"error": "Bad request"}), 400
+
+@app.errorhandler(404)
+def not_found(e):
+    return jsonify({"error": "Not found"}), 404
+
+@app.errorhandler(413)
+def too_large(e):
+    return jsonify({"error": f"Upload too large. Max {MAX_FILE_SIZE // (1024*1024)} MB per file."}), 413
+
+@app.errorhandler(500)
+def server_error(e):
+    logging.exception("Unhandled server error")
+    return jsonify({"error": "Server error — please try again"}), 500
 
 
 def allowed_file(filename):
@@ -110,6 +130,14 @@ def upload():
             results.append({"error": f"'{f.filename}' is not a supported format (JPG, PNG, WEBP only)"})
             continue
         try:
+            # Check individual file size before saving
+            f.seek(0, 2)
+            file_bytes = f.tell()
+            f.seek(0)
+            if file_bytes > MAX_FILE_SIZE:
+                results.append({"error": f"'{secure_filename(f.filename)}' exceeds the 10 MB limit ({file_bytes // (1024*1024)} MB)"})
+                continue
+
             uid, fname, path = save_upload(f)
             original_size = os.path.getsize(path)
             metadata = extract_metadata(path)
