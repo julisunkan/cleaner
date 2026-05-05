@@ -4,10 +4,10 @@ import logging
 
 logger = logging.getLogger(__name__)
 
-MAX_AGE_SECONDS = 3 * 24 * 60 * 60  # 3 days
+DEFAULT_MAX_AGE = 3600  # 1 hour fallback for orphaned files
 
 
-def purge_old_files(*directories):
+def purge_old_files(*directories, max_age_seconds=DEFAULT_MAX_AGE):
     now = time.time()
     removed = 0
     for directory in directories:
@@ -19,10 +19,10 @@ def purge_old_files(*directories):
                 continue
             try:
                 age = now - os.path.getmtime(fpath)
-                if age > MAX_AGE_SECONDS:
+                if age > max_age_seconds:
                     os.remove(fpath)
                     removed += 1
-                    logger.info(f"Auto-deleted: {fpath}")
+                    logger.info(f"Auto-deleted orphan: {fpath}")
             except Exception as e:
                 logger.warning(f"Could not remove {fpath}: {e}")
     return removed

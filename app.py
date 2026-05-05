@@ -1,9 +1,10 @@
 import os
+import io
 import uuid
 import logging
-from datetime import datetime
+import mimetypes
 from flask import (Flask, render_template, request, jsonify,
-                   send_file, redirect, url_for, abort)
+                   Response, abort)
 from werkzeug.utils import secure_filename
 from apscheduler.schedulers.background import BackgroundScheduler
 
@@ -13,7 +14,7 @@ from utils.risk import calculate_risk_score
 from utils.cleaner import remove_all_metadata, remove_gps_only
 from utils.compressor import compress_image
 from utils.zip_utils import create_zip
-from utils.cleanup import purge_old_files, delete_file, get_file_expiry_info
+from utils.cleanup import purge_old_files
 
 logging.basicConfig(level=logging.INFO)
 
@@ -44,13 +45,47 @@ def save_upload(file_obj):
     return uid, fname, path
 
 
-# ── Scheduler ────────────────────────────────────────────────────
+def _read_and_delete(path):
+    """Read file into memory, then immediately delete it from disk."""
+    with open(path, "rb") as f:
+        data = f.read()
+    try:
+        os.remove(path)
+    except Exception:
+        pass
+    return data
+
+
+def _serve_bytes(data, download_name):
+    """Return a file download Response from in-memory bytes."""
+    mime = mimetypes.guess_type(download_name)[0] or "application/octet-stream"
+    return Response(
+        data,
+        headers={
+            "Content-Disposition": f'attachment; filename="{download_name}"',
+            "Content-Type": mime,
+            "Content-Length": str(len(data)),
+            "Cache-Control": "no-store",
+        }
+    )
+
+
+def _silent_delete(*paths):
+    for p in paths:
+        try:
+            if p and os.path.exists(p):
+                os.remove(p)
+        except Exception:
+            pass
+
+
+# ── Safety-net scheduler (cleans up any orphaned files after 1 hour) ─────────
 scheduler = BackgroundScheduler()
 scheduler.add_job(
-    func=lambda: purge_old_files(UPLOAD_DIR, CLEANED_DIR),
+    func=lambda: purge_old_files(UPLOAD_DIR, CLEANED_DIR, max_age_seconds=3600),
     trigger="interval",
-    hours=6,
-    id="auto_cleanup",
+    minutes=30,
+    id="orphan_cleanup",
 )
 scheduler.start()
 
@@ -82,7 +117,6 @@ def upload():
             if gps:
                 address = reverse_geocode(gps["lat"], gps["lon"])
             risk = calculate_risk_score(metadata)
-            expiry = get_file_expiry_info(path)
             results.append({
                 "uid": uid,
                 "original_name": secure_filename(f.filename),
@@ -92,7 +126,6 @@ def upload():
                 "gps": gps,
                 "address": address,
                 "risk": risk,
-                "expiry": expiry,
             })
         except Exception as e:
             results.append({"error": str(e)})
@@ -104,10 +137,10 @@ def upload():
 
 @app.route("/clean", methods=["POST"])
 def clean():
-    data = request.get_json(force=True)
+    data     = request.get_json(force=True)
     uid      = data.get("uid", "")
     fname    = data.get("filename", "")
-    mode     = data.get("mode", "all")          # "all" or "gps"
+    mode     = data.get("mode", "all")
     quality  = int(data.get("quality", 85))
     compress = bool(data.get("compress", False))
 
@@ -116,16 +149,16 @@ def clean():
 
     input_path = os.path.join(UPLOAD_DIR, fname)
     if not os.path.exists(input_path):
-        return jsonify({"error": "Source file not found or expired"}), 404
+        return jsonify({"error": "Source file not found"}), 404
 
-    ext = fname.rsplit(".", 1)[1].lower()
+    ext      = fname.rsplit(".", 1)[1].lower()
     out_name = f"clean_{uid}.{ext}"
     out_path = os.path.join(CLEANED_DIR, out_name)
 
     try:
         if compress:
             compress_image(input_path, out_path, quality=quality, remove_meta=(mode == "all"))
-            if mode == "gps" and not compress:
+            if mode == "gps":
                 remove_gps_only(out_path, out_path)
         elif mode == "gps":
             remove_gps_only(input_path, out_path, quality=quality)
@@ -135,7 +168,9 @@ def clean():
         original_size = os.path.getsize(input_path)
         cleaned_size  = os.path.getsize(out_path)
         after_meta    = extract_metadata(out_path)
-        expiry        = get_file_expiry_info(out_path)
+
+        # Upload no longer needed — delete it now
+        _silent_delete(input_path)
 
         return jsonify({
             "cleaned_filename": out_name,
@@ -143,9 +178,9 @@ def clean():
             "cleaned_size": cleaned_size,
             "bytes_saved": original_size - cleaned_size,
             "after_metadata": after_meta,
-            "expiry": expiry,
         })
     except Exception as e:
+        _silent_delete(input_path, out_path)
         return jsonify({"error": str(e)}), 500
 
 
@@ -155,16 +190,9 @@ def download(filename):
     path = os.path.join(CLEANED_DIR, safe)
     if not os.path.exists(path):
         abort(404)
-    return send_file(path, as_attachment=True, download_name=safe)
-
-
-@app.route("/download-original/<filename>")
-def download_original(filename):
-    safe = secure_filename(filename)
-    path = os.path.join(UPLOAD_DIR, safe)
-    if not os.path.exists(path):
-        abort(404)
-    return send_file(path, as_attachment=True, download_name=safe)
+    # Read into memory and immediately delete from disk
+    data = _read_and_delete(path)
+    return _serve_bytes(data, safe)
 
 
 @app.route("/bulk-clean", methods=["POST"])
@@ -178,16 +206,18 @@ def bulk_clean():
     if not files:
         return jsonify({"error": "No files provided"}), 400
 
-    cleaned_paths = []
-    results = []
+    cleaned_paths  = []
+    upload_paths   = []
+    results        = []
+
     for item in files:
-        uid   = item.get("uid", "")
-        fname = item.get("filename", "")
+        uid        = item.get("uid", "")
+        fname      = item.get("filename", "")
         input_path = os.path.join(UPLOAD_DIR, fname)
         if not os.path.exists(input_path):
             results.append({"uid": uid, "error": "File not found"})
             continue
-        ext = fname.rsplit(".", 1)[1].lower()
+        ext      = fname.rsplit(".", 1)[1].lower()
         out_name = f"clean_{uid}.{ext}"
         out_path = os.path.join(CLEANED_DIR, out_name)
         try:
@@ -198,6 +228,7 @@ def bulk_clean():
             else:
                 remove_all_metadata(input_path, out_path, quality=quality)
             cleaned_paths.append(out_path)
+            upload_paths.append(input_path)
             results.append({"uid": uid, "cleaned_filename": out_name, "ok": True})
         except Exception as e:
             results.append({"uid": uid, "error": str(e)})
@@ -209,6 +240,10 @@ def bulk_clean():
     zip_path = os.path.join(CLEANED_DIR, zip_name)
     create_zip(cleaned_paths, zip_path)
 
+    # Delete all upload files and individual cleaned files — only ZIP remains
+    _silent_delete(*upload_paths)
+    _silent_delete(*cleaned_paths)
+
     return jsonify({"zip_filename": zip_name, "results": results})
 
 
@@ -218,17 +253,17 @@ def download_zip(filename):
     path = os.path.join(CLEANED_DIR, safe)
     if not os.path.exists(path):
         abort(404)
-    return send_file(path, as_attachment=True, download_name=safe, mimetype="application/zip")
-
-
-@app.route("/delete/<filename>", methods=["POST"])
-def delete_uploaded(filename):
-    safe = secure_filename(filename)
-    u = delete_file(os.path.join(UPLOAD_DIR, safe))
-    ext = safe.rsplit(".", 1)
-    uid = safe.rsplit(".", 1)[0]
-    c = delete_file(os.path.join(CLEANED_DIR, f"clean_{safe}"))
-    return jsonify({"deleted": u or c})
+    # Read into memory and immediately delete from disk
+    data = _read_and_delete(path)
+    return Response(
+        data,
+        headers={
+            "Content-Disposition": f'attachment; filename="{safe}"',
+            "Content-Type": "application/zip",
+            "Content-Length": str(len(data)),
+            "Cache-Control": "no-store",
+        }
+    )
 
 
 # ── API Endpoint ─────────────────────────────────────────────────
@@ -254,8 +289,12 @@ def api_clean():
             remove_gps_only(input_path, out_path, quality=quality)
         else:
             remove_all_metadata(input_path, out_path, quality=quality)
-        return send_file(out_path, as_attachment=True, download_name=out_name)
+        # Read cleaned file, delete both files, return bytes
+        data = _read_and_delete(out_path)
+        _silent_delete(input_path)
+        return _serve_bytes(data, out_name)
     except Exception as e:
+        _silent_delete(input_path, out_path)
         return jsonify({"error": str(e)}), 500
 
 
@@ -277,13 +316,11 @@ def manifest():
             {"src": "/static/icon-512.png", "sizes": "512x512", "type": "image/png", "purpose": "any maskable"},
         ]
     }
-    from flask import Response
     return Response(json.dumps(data), mimetype="application/manifest+json")
 
 
 @app.route("/sw.js")
 def service_worker():
-    from flask import Response
     js = """
 const CACHE = 'metacleaner-v1';
 const ASSETS = ['/', '/static/style.css', '/static/script.js'];

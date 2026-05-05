@@ -300,8 +300,8 @@ function renderSingleResult(item, cleanData) {
 
         <!-- Actions -->
         <div class="actions-row mt-4">
-          <a class="btn btn-success" href="/download/${encodeURIComponent(cleanData.cleaned_filename)}">⬇️ Download Clean Image</a>
-          <span class="countdown-badge">🕐 Files deleted in <strong>${countdownStr}</strong></span>
+          <a class="btn btn-success" href="/download/${encodeURIComponent(cleanData.cleaned_filename)}" id="dlBtn">⬇️ Download Clean Image</a>
+          <span class="countdown-badge">🗑️ File deleted <strong>after download</strong></span>
         </div>
       </div>
 
@@ -336,17 +336,17 @@ function renderSingleResult(item, cleanData) {
       </div>
     </div>`;
 
-  // Start live countdown
-  if (expiry && expiry.remaining_seconds > 0) {
-    let secs = expiry.remaining_seconds;
-    const badge = resultsArea.querySelector('.countdown-badge strong');
-    if (badge) {
-      const timer = setInterval(() => {
-        secs -= 1;
-        if (secs <= 0) { clearInterval(timer); badge.textContent = 'soon'; return; }
-        badge.textContent = fmtCountdown(secs);
-      }, 1000);
-    }
+  // Disable download button after first click (file is gone after one download)
+  const dlBtn = resultsArea.querySelector('#dlBtn');
+  if (dlBtn) {
+    dlBtn.addEventListener('click', () => {
+      setTimeout(() => {
+        dlBtn.textContent = '✅ Downloaded & Deleted';
+        dlBtn.classList.remove('btn-success');
+        dlBtn.classList.add('btn-ghost');
+        dlBtn.style.pointerEvents = 'none';
+      }, 1500);
+    });
   }
 }
 
