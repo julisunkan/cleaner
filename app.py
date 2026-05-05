@@ -8,10 +8,10 @@ from flask import (Flask, render_template, request, jsonify,
 from werkzeug.utils import secure_filename
 from apscheduler.schedulers.background import BackgroundScheduler
 
-from utils.metadata import extract_metadata
+from utils.metadata import extract_metadata, extract_metadata_fields
 from utils.gps import extract_gps_coordinates, reverse_geocode
 from utils.risk import calculate_risk_score
-from utils.cleaner import remove_all_metadata, remove_gps_only
+from utils.cleaner import remove_all_metadata, remove_gps_only, remove_custom_fields
 from utils.compressor import compress_image
 from utils.zip_utils import create_zip
 from utils.cleanup import purge_old_files
@@ -26,15 +26,15 @@ os.makedirs(UPLOAD_DIR, exist_ok=True)
 os.makedirs(CLEANED_DIR, exist_ok=True)
 
 ALLOWED_EXTENSIONS = {"jpg", "jpeg", "png", "webp"}
-MAX_FILE_SIZE      = 10 * 1024 * 1024   # 10 MB per individual file (enforced in route)
-MAX_REQUEST_SIZE   = 60 * 1024 * 1024   # 60 MB total request (supports ~5 × 10 MB files)
+MAX_FILE_SIZE      = 10 * 1024 * 1024   # 10 MB per individual file
+MAX_REQUEST_SIZE   = 60 * 1024 * 1024   # 60 MB total request
 
 app = Flask(__name__)
 app.secret_key = os.environ.get("SESSION_SECRET", "img-meta-tool-2024")
 app.config["MAX_CONTENT_LENGTH"] = MAX_REQUEST_SIZE
 
 
-# ── JSON error handlers (so the frontend never gets an HTML error page) ───────
+# ── JSON error handlers ───────────────────────────────────────────
 @app.errorhandler(400)
 def bad_request(e):
     return jsonify({"error": "Bad request"}), 400
@@ -67,7 +67,6 @@ def save_upload(file_obj):
 
 
 def _read_and_delete(path):
-    """Read file into memory, then immediately delete it from disk."""
     with open(path, "rb") as f:
         data = f.read()
     try:
@@ -78,7 +77,6 @@ def _read_and_delete(path):
 
 
 def _serve_bytes(data, download_name):
-    """Return a file download Response from in-memory bytes."""
     mime = mimetypes.guess_type(download_name)[0] or "application/octet-stream"
     return Response(
         data,
@@ -100,7 +98,15 @@ def _silent_delete(*paths):
             pass
 
 
-# ── Safety-net scheduler (cleans up any orphaned files after 1 hour) ─────────
+def _output_ext(src_fname, output_format):
+    """Return the file extension to use for the cleaned output."""
+    src_ext = src_fname.rsplit(".", 1)[1].lower()
+    if output_format and output_format.lower() not in ("same", ""):
+        return {"jpeg": "jpg", "png": "png", "webp": "webp"}.get(output_format.lower(), src_ext)
+    return src_ext
+
+
+# ── Safety-net scheduler ─────────────────────────────────────────
 scheduler = BackgroundScheduler()
 scheduler.add_job(
     func=lambda: purge_old_files(UPLOAD_DIR, CLEANED_DIR, max_age_seconds=3600),
@@ -130,7 +136,6 @@ def upload():
             results.append({"error": f"'{f.filename}' is not a supported format (JPG, PNG, WEBP only)"})
             continue
         try:
-            # Check individual file size before saving
             f.seek(0, 2)
             file_bytes = f.tell()
             f.seek(0)
@@ -139,24 +144,26 @@ def upload():
                 continue
 
             uid, fname, path = save_upload(f)
-            original_size = os.path.getsize(path)
-            metadata = extract_metadata(path)
-            gps = extract_gps_coordinates(path)
-            address = None
+            original_size   = os.path.getsize(path)
+            metadata        = extract_metadata(path)
+            metadata_fields = extract_metadata_fields(path)
+            gps             = extract_gps_coordinates(path)
+            address         = None
             if gps:
                 address = reverse_geocode(gps["lat"], gps["lon"])
-            risk       = calculate_risk_score(metadata)
+            risk        = calculate_risk_score(metadata)
             preview_b64 = get_preview_b64(path)
             results.append({
-                "uid": uid,
-                "original_name": secure_filename(f.filename),
-                "filename": fname,
-                "original_size": original_size,
-                "metadata": metadata,
-                "gps": gps,
-                "address": address,
-                "risk": risk,
-                "preview_b64": preview_b64,
+                "uid":             uid,
+                "original_name":   secure_filename(f.filename),
+                "filename":        fname,
+                "original_size":   original_size,
+                "metadata":        metadata,
+                "metadata_fields": metadata_fields,
+                "gps":             gps,
+                "address":         address,
+                "risk":            risk,
+                "preview_b64":     preview_b64,
             })
         except Exception as e:
             results.append({"error": str(e)})
@@ -174,6 +181,9 @@ def clean():
     mode     = data.get("mode", "all")
     quality  = int(data.get("quality", 85))
     compress = bool(data.get("compress", False))
+    output_format    = (data.get("output_format") or "same").lower()
+    max_width        = int(data.get("max_width") or 0) or None
+    fields_to_remove = data.get("fields_to_remove") or []
 
     if not fname or not uid:
         return jsonify({"error": "Missing file info"}), 400
@@ -182,34 +192,45 @@ def clean():
     if not os.path.exists(input_path):
         return jsonify({"error": "Source file not found"}), 404
 
-    ext      = fname.rsplit(".", 1)[1].lower()
-    out_name = f"clean_{uid}.{ext}"
+    out_ext  = _output_ext(fname, output_format)
+    out_name = f"clean_{uid}.{out_ext}"
     out_path = os.path.join(CLEANED_DIR, out_name)
 
     try:
         if compress:
             compress_image(input_path, out_path, quality=quality, remove_meta=(mode == "all"))
             if mode == "gps":
-                remove_gps_only(out_path, out_path)
+                remove_gps_only(out_path, out_path, quality=quality,
+                                output_format=output_format, max_width=max_width)
+            elif mode == "custom":
+                remove_custom_fields(out_path, out_path, fields_to_remove=fields_to_remove,
+                                     quality=quality, output_format=output_format, max_width=max_width)
+            elif output_format not in ("same", "") or max_width:
+                remove_all_metadata(out_path, out_path, quality=quality,
+                                    output_format=output_format, max_width=max_width)
         elif mode == "gps":
-            remove_gps_only(input_path, out_path, quality=quality)
+            remove_gps_only(input_path, out_path, quality=quality,
+                            output_format=output_format, max_width=max_width)
+        elif mode == "custom":
+            remove_custom_fields(input_path, out_path, fields_to_remove=fields_to_remove,
+                                 quality=quality, output_format=output_format, max_width=max_width)
         else:
-            remove_all_metadata(input_path, out_path, quality=quality)
+            remove_all_metadata(input_path, out_path, quality=quality,
+                                output_format=output_format, max_width=max_width)
 
-        original_size    = os.path.getsize(input_path)
-        cleaned_size     = os.path.getsize(out_path)
-        after_meta       = extract_metadata(out_path)
-        cleaned_preview  = get_preview_b64(out_path)
+        original_size   = os.path.getsize(input_path)
+        cleaned_size    = os.path.getsize(out_path)
+        after_meta      = extract_metadata(out_path)
+        cleaned_preview = get_preview_b64(out_path)
 
-        # Upload no longer needed — delete it now
         _silent_delete(input_path)
 
         return jsonify({
-            "cleaned_filename": out_name,
-            "original_size": original_size,
-            "cleaned_size": cleaned_size,
-            "bytes_saved": original_size - cleaned_size,
-            "after_metadata": after_meta,
+            "cleaned_filename":    out_name,
+            "original_size":       original_size,
+            "cleaned_size":        cleaned_size,
+            "bytes_saved":         original_size - cleaned_size,
+            "after_metadata":      after_meta,
             "cleaned_preview_b64": cleaned_preview,
         })
     except Exception as e:
@@ -223,7 +244,6 @@ def download(filename):
     path = os.path.join(CLEANED_DIR, safe)
     if not os.path.exists(path):
         abort(404)
-    # Read into memory and immediately delete from disk
     data = _read_and_delete(path)
     return _serve_bytes(data, safe)
 
@@ -235,13 +255,16 @@ def bulk_clean():
     mode     = data.get("mode", "all")
     quality  = int(data.get("quality", 85))
     compress = bool(data.get("compress", False))
+    output_format    = (data.get("output_format") or "same").lower()
+    max_width        = int(data.get("max_width") or 0) or None
+    fields_to_remove = data.get("fields_to_remove") or []
 
     if not files:
         return jsonify({"error": "No files provided"}), 400
 
-    cleaned_paths  = []
-    upload_paths   = []
-    results        = []
+    cleaned_paths = []
+    upload_paths  = []
+    results       = []
 
     for item in files:
         uid        = item.get("uid", "")
@@ -250,16 +273,32 @@ def bulk_clean():
         if not os.path.exists(input_path):
             results.append({"uid": uid, "error": "File not found"})
             continue
-        ext      = fname.rsplit(".", 1)[1].lower()
-        out_name = f"clean_{uid}.{ext}"
+
+        out_ext  = _output_ext(fname, output_format)
+        out_name = f"clean_{uid}.{out_ext}"
         out_path = os.path.join(CLEANED_DIR, out_name)
         try:
             if compress:
                 compress_image(input_path, out_path, quality=quality, remove_meta=(mode == "all"))
+                if mode == "gps":
+                    remove_gps_only(out_path, out_path, quality=quality,
+                                    output_format=output_format, max_width=max_width)
+                elif mode == "custom":
+                    remove_custom_fields(out_path, out_path, fields_to_remove=fields_to_remove,
+                                         quality=quality, output_format=output_format, max_width=max_width)
+                elif output_format not in ("same", "") or max_width:
+                    remove_all_metadata(out_path, out_path, quality=quality,
+                                        output_format=output_format, max_width=max_width)
             elif mode == "gps":
-                remove_gps_only(input_path, out_path, quality=quality)
+                remove_gps_only(input_path, out_path, quality=quality,
+                                output_format=output_format, max_width=max_width)
+            elif mode == "custom":
+                remove_custom_fields(input_path, out_path, fields_to_remove=fields_to_remove,
+                                     quality=quality, output_format=output_format, max_width=max_width)
             else:
-                remove_all_metadata(input_path, out_path, quality=quality)
+                remove_all_metadata(input_path, out_path, quality=quality,
+                                    output_format=output_format, max_width=max_width)
+
             cleaned_paths.append(out_path)
             upload_paths.append(input_path)
             results.append({"uid": uid, "cleaned_filename": out_name, "ok": True})
@@ -273,7 +312,6 @@ def bulk_clean():
     zip_path = os.path.join(CLEANED_DIR, zip_name)
     create_zip(cleaned_paths, zip_path)
 
-    # Delete all upload files and individual cleaned files — only ZIP remains
     _silent_delete(*upload_paths)
     _silent_delete(*cleaned_paths)
 
@@ -286,7 +324,6 @@ def download_zip(filename):
     path = os.path.join(CLEANED_DIR, safe)
     if not os.path.exists(path):
         abort(404)
-    # Read into memory and immediately delete from disk
     data = _read_and_delete(path)
     return Response(
         data,
@@ -322,7 +359,6 @@ def api_clean():
             remove_gps_only(input_path, out_path, quality=quality)
         else:
             remove_all_metadata(input_path, out_path, quality=quality)
-        # Read cleaned file, delete both files, return bytes
         data = _read_and_delete(out_path)
         _silent_delete(input_path)
         return _serve_bytes(data, out_name)
@@ -360,7 +396,7 @@ def manifest():
 @app.route("/sw.js")
 def service_worker():
     js = """
-const CACHE = 'imgmeta-v2';
+const CACHE = 'imgmeta-v3';
 const ASSETS = ['/', '/static/style.css', '/static/script.js'];
 self.addEventListener('install', e => {
   e.waitUntil(caches.open(CACHE).then(c => c.addAll(ASSETS)));

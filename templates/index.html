@@ -5,6 +5,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>Image MetaData Removal Tool</title>
   <link rel="stylesheet" href="/static/style.css">
+  <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
   <link rel="manifest" href="/manifest.json">
   <link rel="icon" type="image/png" sizes="32x32" href="/static/favicon.png">
   <link rel="shortcut icon" href="/static/favicon.ico">
@@ -27,7 +28,7 @@
     <!-- Upload Zone -->
     <section class="card upload-section" id="uploadSection">
       <h2 class="section-title">Upload Images</h2>
-      <p class="section-sub">Supported: JPG, JPEG, PNG, WEBP · Max 10MB per file</p>
+      <p class="section-sub">Supported: JPG, JPEG, PNG, WEBP · Max 10MB · Drag, drop, or paste (Ctrl+V)</p>
 
       <div class="drop-zone" id="dropZone">
         <div class="drop-icon">📂</div>
@@ -41,13 +42,40 @@
 
       <!-- Options -->
       <div class="options-row" id="optionsRow" style="display:none;">
+
+        <!-- Removal Mode -->
         <div class="option-group">
           <label class="option-label">Removal Mode</label>
           <div class="toggle-group">
-            <button class="toggle-btn active" data-mode="all" id="modeAll">Remove All Metadata</button>
-            <button class="toggle-btn" data-mode="gps" id="modeGps">GPS Only</button>
+            <button class="toggle-btn active" data-mode="all"    id="modeAll">Remove All</button>
+            <button class="toggle-btn"        data-mode="gps"    id="modeGps">GPS Only</button>
+            <button class="toggle-btn"        data-mode="custom" id="modeCustom">✏️ Custom</button>
           </div>
         </div>
+
+        <!-- Output Format -->
+        <div class="option-group">
+          <label class="option-label">Output Format</label>
+          <select id="formatSelect" class="format-select">
+            <option value="same">Same as input</option>
+            <option value="jpeg">JPEG</option>
+            <option value="png">PNG</option>
+            <option value="webp">WebP</option>
+          </select>
+        </div>
+
+        <!-- Resize -->
+        <div class="option-group">
+          <label class="option-label">
+            <input type="checkbox" id="resizeCheck"> Limit Width
+          </label>
+          <div id="resizeGroup" class="resize-group hidden">
+            <input type="number" id="resizeWidth" class="resize-input" value="1920" min="100" max="8000" step="10">
+            <span class="resize-unit">px</span>
+          </div>
+        </div>
+
+        <!-- Compression -->
         <div class="option-group">
           <label class="option-label">
             <input type="checkbox" id="compressCheck"> Enable Compression
@@ -57,6 +85,7 @@
             <input type="range" id="qualitySlider" min="50" max="95" value="85" class="slider">
           </div>
         </div>
+
         <button class="btn btn-success btn-lg" id="processBtn">🧹 Clean & Process</button>
       </div>
 
@@ -71,6 +100,13 @@
     <!-- Results Area -->
     <div id="resultsArea"></div>
 
+    <!-- Batch GPS Map (shown when bulk upload has GPS-tagged images) -->
+    <div id="batchMapWrap" class="card hidden">
+      <h3 class="section-title" style="margin-bottom:12px;">🗺️ GPS Locations in Batch</h3>
+      <p class="section-sub" style="margin-bottom:12px;">These images contain embedded location data</p>
+      <div id="batchLeafletMap" class="leaflet-map-container"></div>
+    </div>
+
     <!-- Session History -->
     <section id="historySection" class="card hidden">
       <div class="hist-header">
@@ -80,6 +116,7 @@
         </div>
         <button class="btn btn-ghost" onclick="clearHistory()">🗑️ Clear All</button>
       </div>
+      <div id="privacyChart"></div>
       <div id="historyList"></div>
     </section>
 
@@ -89,6 +126,7 @@
     <p>🗑️ Files are deleted <strong>immediately after download</strong> · Nothing is stored on our servers</p>
   </footer>
 
+  <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
   <script src="/static/script.js"></script>
 </body>
 </html>

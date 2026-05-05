@@ -1,27 +1,40 @@
 'use strict';
 
 /* ── State ─────────────────────────────────────── */
-let selectedFiles   = [];
-let uploadedResults = [];
-let cleanMode       = 'all';
-let sessionHistory  = [];   // { type, name, size, bytesSaved, risk, preview, blobUrl, filename, timestamp }
+let selectedFiles      = [];
+let uploadedResults    = [];
+let cleanMode          = 'all';
+let outputFormat       = 'same';
+let doResize           = false;
+let resizeMaxW         = 1920;
+let sessionHistory     = [];
+let pendingCustomItems = [];
+let pendingOriginals   = [];
+let _lastSingleMeta    = null;
+let _batchLeafletMap   = null;
 
 /* ── DOM refs ──────────────────────────────────── */
-const dropZone       = document.getElementById('dropZone');
-const fileInput      = document.getElementById('fileInput');
-const fileQueue      = document.getElementById('fileQueue');
-const optionsRow     = document.getElementById('optionsRow');
-const processBtn     = document.getElementById('processBtn');
-const progressWrap   = document.getElementById('progressBar');
-const progressFill   = document.getElementById('progressFill');
-const progressLabel  = document.getElementById('progressLabel');
-const resultsArea    = document.getElementById('resultsArea');
-const compressCheck  = document.getElementById('compressCheck');
-const qualityGroup   = document.getElementById('qualityGroup');
-const qualitySlider  = document.getElementById('qualitySlider');
-const qualityVal     = document.getElementById('qualityVal');
-const historySection = document.getElementById('historySection');
-const historyList    = document.getElementById('historyList');
+const dropZone          = document.getElementById('dropZone');
+const fileInput         = document.getElementById('fileInput');
+const fileQueue         = document.getElementById('fileQueue');
+const optionsRow        = document.getElementById('optionsRow');
+const processBtn        = document.getElementById('processBtn');
+const progressWrap      = document.getElementById('progressBar');
+const progressFill      = document.getElementById('progressFill');
+const progressLabel     = document.getElementById('progressLabel');
+const resultsArea       = document.getElementById('resultsArea');
+const compressCheck     = document.getElementById('compressCheck');
+const qualityGroup      = document.getElementById('qualityGroup');
+const qualitySlider     = document.getElementById('qualitySlider');
+const qualityVal        = document.getElementById('qualityVal');
+const historySection    = document.getElementById('historySection');
+const historyList       = document.getElementById('historyList');
+const formatSelect      = document.getElementById('formatSelect');
+const resizeCheck       = document.getElementById('resizeCheck');
+const resizeGroup       = document.getElementById('resizeGroup');
+const resizeWidthInput  = document.getElementById('resizeWidth');
+const batchMapWrap      = document.getElementById('batchMapWrap');
+const privacyChartEl    = document.getElementById('privacyChart');
 
 /* ── Helpers ────────────────────────────────────── */
 function fmtBytes(b) {
@@ -66,8 +79,20 @@ dropZone.addEventListener('drop', e => {
 });
 fileInput.addEventListener('change', () => addFiles([...fileInput.files]));
 
+/* ── Clipboard Paste ────────────────────────────── */
+window.addEventListener('paste', e => {
+  const items = [...(e.clipboardData?.items || [])];
+  const files = items
+    .filter(i => i.type.startsWith('image/'))
+    .map(i => i.getAsFile())
+    .filter(Boolean);
+  if (files.length) {
+    addFiles(files);
+  }
+});
+
 function addFiles(newFiles) {
-  const allowed = ['image/jpeg','image/png','image/webp'];
+  const allowed = ['image/jpeg', 'image/png', 'image/webp'];
   newFiles.forEach(f => {
     if (!allowed.includes(f.type)) return;
     if (f.size > 10 * 1024 * 1024) { alert(`${f.name} exceeds 10MB limit.`); return; }
@@ -109,6 +134,20 @@ document.querySelectorAll('.toggle-btn').forEach(btn => {
   });
 });
 
+/* ── Format / Resize ────────────────────────────── */
+formatSelect.addEventListener('change', () => {
+  outputFormat = formatSelect.value;
+});
+
+resizeCheck.addEventListener('change', () => {
+  doResize = resizeCheck.checked;
+  resizeGroup.classList.toggle('hidden', !doResize);
+});
+
+resizeWidthInput.addEventListener('input', () => {
+  resizeMaxW = parseInt(resizeWidthInput.value) || 1920;
+});
+
 /* ── Compression ────────────────────────────────── */
 compressCheck.addEventListener('change', () => {
   qualityGroup.classList.toggle('hidden', !compressCheck.checked);
@@ -129,6 +168,12 @@ async function processImages() {
   resultsArea.innerHTML = '';
   uploadedResults = [];
 
+  // Capture original file blobs BEFORE any processing (for undo feature)
+  const originals = selectedFiles.map(f => ({
+    blobUrl: URL.createObjectURL(f),
+    name: f.name,
+  }));
+
   try {
     const fd = new FormData();
     selectedFiles.forEach(f => fd.append('images', f));
@@ -142,6 +187,7 @@ async function processImages() {
     if (uploadData.bulk) {
       items = uploadData.results;
     } else if (uploadData.error) {
+      originals.forEach(o => URL.revokeObjectURL(o.blobUrl));
       showError(uploadData.error);
       return;
     } else {
@@ -153,13 +199,22 @@ async function processImages() {
     const quality    = parseInt(qualitySlider.value);
     const doCompress = compressCheck.checked;
 
+    // Custom mode: show editor before cleaning
+    if (cleanMode === 'custom') {
+      pendingCustomItems = items;
+      pendingOriginals   = originals;
+      showCustomEditor(items);
+      return; // finally block still runs (re-enables btn, hides progress, clears queue)
+    }
+
     if (items.length > 1) {
-      await processBulk(items, quality, doCompress);
+      await processBulk(items, quality, doCompress, originals);
     } else {
-      await processSingle(items[0], quality, doCompress);
+      await processSingle(items[0], quality, doCompress, originals[0]);
     }
 
   } catch (err) {
+    originals.forEach(o => URL.revokeObjectURL(o.blobUrl));
     showError('Network error: ' + err.message);
   } finally {
     processBtn.disabled = false;
@@ -169,76 +224,104 @@ async function processImages() {
   }
 }
 
-async function processSingle(item, quality, doCompress) {
+async function processSingle(item, quality, doCompress, original = null, fieldsToRemove = null) {
   if (item.error) { showError(item.error); return; }
+
+  const activeMode = fieldsToRemove !== null ? 'custom' : cleanMode;
 
   setProgress(55, 'Removing metadata…');
   const cleanRes = await fetch('/clean', {
-    method: 'POST',
-    headers: {'Content-Type':'application/json'},
+    method:  'POST',
+    headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({
-      uid: item.uid,
-      filename: item.filename,
-      mode: cleanMode,
-      quality, compress: doCompress
+      uid:              item.uid,
+      filename:         item.filename,
+      mode:             activeMode,
+      quality,
+      compress:         doCompress,
+      output_format:    outputFormat,
+      max_width:        doResize ? resizeMaxW : null,
+      fields_to_remove: fieldsToRemove || [],
     })
   });
   const cleanData = await cleanRes.json();
   if (cleanData.error) { showError(cleanData.error); return; }
 
-  // Fetch the cleaned file into memory — this also triggers server-side deletion
   setProgress(80, 'Saving to session…');
   const blobRes = await fetch('/download/' + encodeURIComponent(cleanData.cleaned_filename));
   const blob    = await blobRes.blob();
   const blobUrl = URL.createObjectURL(blob);
 
   sessionHistory.unshift({
-    type:      'single',
-    name:      item.original_name || item.filename,
-    size:      cleanData.cleaned_size,
-    bytesSaved: cleanData.bytes_saved || 0,
-    risk:      item.risk || {},
-    preview:   cleanData.cleaned_preview_b64 || '',
+    type:             'single',
+    name:             item.original_name || item.filename,
+    size:             cleanData.cleaned_size,
+    bytesSaved:       cleanData.bytes_saved || 0,
+    risk:             item.risk || {},
+    preview:          cleanData.cleaned_preview_b64 || '',
     blobUrl,
-    filename:  cleanData.cleaned_filename,
-    timestamp: Date.now(),
+    filename:         cleanData.cleaned_filename,
+    timestamp:        Date.now(),
+    originalBlobUrl:  original?.blobUrl  || null,
+    originalFilename: original?.name     || null,
+    mode:             activeMode,
   });
 
+  // Store for CSV export
+  _lastSingleMeta = {
+    meta:           item.metadata || {},
+    afterMeta:      cleanData.after_metadata || {},
+    mode:           activeMode,
+    fieldsToRemove: fieldsToRemove || [],
+    filename:       item.original_name || item.filename,
+  };
+
   setProgress(100, 'Done!');
-  renderSingleResult(item, cleanData, blobUrl);
+  renderSingleResult(item, cleanData, blobUrl, original, fieldsToRemove);
   renderHistory();
 }
 
-async function processBulk(items, quality, doCompress) {
+async function processBulk(items, quality, doCompress, originals = [], fieldsToRemove = null) {
   setProgress(50, `Cleaning ${items.length} images…`);
   const validItems = items.filter(i => !i.error);
+  const activeMode = fieldsToRemove !== null ? 'custom' : cleanMode;
+
   const zipRes = await fetch('/bulk-clean', {
-    method: 'POST',
-    headers: {'Content-Type':'application/json'},
+    method:  'POST',
+    headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({
-      files: validItems.map(i => ({uid: i.uid, filename: i.filename})),
-      mode: cleanMode, quality, compress: doCompress
+      files:            validItems.map(i => ({ uid: i.uid, filename: i.filename })),
+      mode:             activeMode,
+      quality,
+      compress:         doCompress,
+      output_format:    outputFormat,
+      max_width:        doResize ? resizeMaxW : null,
+      fields_to_remove: fieldsToRemove || [],
     })
   });
   const zipData = await zipRes.json();
   if (zipData.error) { showError(zipData.error); return; }
 
-  // Fetch zip blob into memory
   setProgress(85, 'Saving to session…');
   const zipBlobRes = await fetch('/download-zip/' + encodeURIComponent(zipData.zip_filename));
   const zipBlob    = await zipBlobRes.blob();
   const zipBlobUrl = URL.createObjectURL(zipBlob);
 
+  // Revoke original blobs (not stored for bulk)
+  originals.forEach(o => URL.revokeObjectURL(o.blobUrl));
+
   sessionHistory.unshift({
-    type:      'bulk',
-    name:      `Batch — ${validItems.length} image${validItems.length !== 1 ? 's' : ''}`,
-    size:      zipBlob.size,
-    bytesSaved: 0,
-    risk:      {},
-    preview:   '',
-    blobUrl:   zipBlobUrl,
-    filename:  zipData.zip_filename,
-    timestamp: Date.now(),
+    type:             'bulk',
+    name:             `Batch — ${validItems.length} image${validItems.length !== 1 ? 's' : ''}`,
+    size:             zipBlob.size,
+    bytesSaved:       0,
+    risk:             {},
+    preview:          '',
+    blobUrl:          zipBlobUrl,
+    filename:         zipData.zip_filename,
+    timestamp:        Date.now(),
+    originalBlobUrl:  null,
+    originalFilename: null,
   });
 
   setProgress(100, 'Done!');
@@ -246,12 +329,115 @@ async function processBulk(items, quality, doCompress) {
   renderHistory();
 }
 
+/* ── Custom Editor ──────────────────────────────── */
+function showCustomEditor(items) {
+  const item   = items[0];
+  const fields = item.metadata_fields || [];
+
+  if (!fields.length) {
+    resultsArea.innerHTML = `<div class="card error-box">ℹ️ No editable EXIF fields found in this image. Switching to Remove All mode.</div>`;
+    return;
+  }
+
+  // Group fields by IFD
+  const groups = {};
+  for (const f of fields) {
+    const ifd = f.key.split(':')[0];
+    if (!groups[ifd]) groups[ifd] = [];
+    groups[ifd].push(f);
+  }
+
+  const ifdLabels = {
+    '0th':  '📷 Basic Info',
+    'Exif': '🔬 Camera Details',
+    'GPS':  '📍 GPS Location',
+    '1st':  '🖼️ Thumbnail',
+  };
+
+  const groupHtml = Object.entries(groups).map(([ifd, flds], gi) => {
+    const label    = ifdLabels[ifd] || ifd;
+    const fieldRows = flds.map((f, fi) => {
+      const cbId = `cf_${gi}_${fi}`;
+      return `<div class="editor-field">
+        <input type="checkbox" id="${cbId}" data-key="${escHtml(f.key)}" checked>
+        <label for="${cbId}" class="editor-field-label ${f.is_gps ? 'is-gps' : ''}">${escHtml(f.label)}</label>
+        <span class="editor-field-value" title="${escHtml(f.value)}">${escHtml(f.value)}</span>
+      </div>`;
+    }).join('');
+    return `<div class="editor-section-header">${label}</div>${fieldRows}`;
+  }).join('');
+
+  const multiNote = items.length > 1
+    ? `<p style="color:var(--warning);font-size:.82rem;margin-bottom:12px;">⚠️ Field selections will apply to all ${items.length} images in the batch.</p>`
+    : '';
+
+  resultsArea.innerHTML = `
+    <div class="card custom-editor-wrap">
+      <h3>✏️ Custom Field Editor</h3>
+      <p>Check the fields you want to <strong>remove</strong>. Unchecked fields will be kept intact.</p>
+      ${multiNote}
+      <div class="editor-toolbar">
+        <button class="btn btn-ghost btn-sm" onclick="selectAllEditorFields(true)">☑ Select All</button>
+        <button class="btn btn-ghost btn-sm" onclick="selectAllEditorFields(false)">☐ Deselect All</button>
+        <button class="btn btn-ghost btn-sm" onclick="selectGpsEditorFields()">📍 GPS Only</button>
+        <span style="margin-left:auto;color:var(--muted);font-size:.8rem;">${fields.length} fields found</span>
+      </div>
+      <div class="editor-fields" id="editorFields">${groupHtml}</div>
+      <div class="actions-row mt-4">
+        <button class="btn btn-success btn-lg" onclick="applyCustomClean()">🧹 Apply Custom Clean</button>
+      </div>
+    </div>`;
+}
+
+window.selectAllEditorFields = function(checked) {
+  document.querySelectorAll('#editorFields input[type=checkbox]').forEach(cb => cb.checked = checked);
+};
+
+window.selectGpsEditorFields = function() {
+  document.querySelectorAll('#editorFields input[type=checkbox]').forEach(cb => {
+    cb.checked = (cb.dataset.key || '').startsWith('GPS:');
+  });
+};
+
+window.applyCustomClean = async function() {
+  const checkboxes    = document.querySelectorAll('#editorFields input[type=checkbox]');
+  const fieldsToRemove = [...checkboxes].filter(cb => cb.checked).map(cb => cb.dataset.key);
+
+  const quality    = parseInt(qualitySlider.value);
+  const doCompress = compressCheck.checked;
+  const items      = pendingCustomItems;
+  const originals  = pendingOriginals;
+
+  processBtn.disabled = true;
+  showProgress(true);
+  setProgress(50, 'Applying custom clean…');
+
+  try {
+    if (items.length > 1) {
+      await processBulk(items, quality, doCompress, originals, fieldsToRemove);
+    } else {
+      await processSingle(items[0], quality, doCompress, originals[0], fieldsToRemove);
+    }
+  } catch (err) {
+    showError('Error applying custom clean: ' + err.message);
+    originals.forEach(o => URL.revokeObjectURL(o.blobUrl));
+  } finally {
+    processBtn.disabled = false;
+    showProgress(false);
+    selectedFiles      = [];
+    pendingCustomItems = [];
+    pendingOriginals   = [];
+    renderQueue();
+  }
+};
+
 /* ── Render Single ──────────────────────────────── */
-function renderSingleResult(item, cleanData, blobUrl) {
-  const risk     = item.risk || {};
-  const meta     = item.metadata || {};
-  const afterMeta= cleanData.after_metadata || {};
-  const gps      = item.gps;
+function renderSingleResult(item, cleanData, blobUrl, original = null, fieldsToRemove = null) {
+  const activeMode   = fieldsToRemove !== null ? 'custom' : cleanMode;
+  const risk         = item.risk || {};
+  const meta         = item.metadata || {};
+  const afterMeta    = cleanData.after_metadata || {};
+  const gps          = item.gps;
 
   const metaKeys     = Object.keys(meta).filter(k => k !== 'image_info' && k !== '_error');
   const metaCount    = metaKeys.length;
@@ -260,6 +446,8 @@ function renderSingleResult(item, cleanData, blobUrl) {
   const bytesSaved   = cleanData.bytes_saved || 0;
 
   const riskBarColor = risk.level === 'HIGH' ? '#ef4444' : risk.level === 'MEDIUM' ? '#f59e0b' : '#10b981';
+  const modeLabels   = { all: 'All Metadata', gps: 'GPS Only', custom: 'Custom Fields' };
+  const modeLabel    = modeLabels[activeMode] || activeMode;
 
   let gpsHtml = '';
   if (gps) {
@@ -272,33 +460,13 @@ function renderSingleResult(item, cleanData, blobUrl) {
           <iframe class="map-frame"
             src="https://maps.google.com/maps?q=${gps.lat},${gps.lon}&z=14&output=embed"
             allowfullscreen loading="lazy" referrerpolicy="no-referrer-when-downgrade"></iframe>
-          ${cleanMode === 'all' ? '<p class="mt-4 text-success" style="font-size:.85rem">✅ GPS data will be removed</p>' :
-            '<p class="mt-4 text-success" style="font-size:.85rem">✅ GPS-only mode selected</p>'}
         </div>
       </div>`;
   }
 
-  let metaHtml = '';
-  if (metaKeys.length === 0) {
-    metaHtml = '<p class="meta-empty">✅ No metadata found in this image</p>';
-  } else {
-    const rows = metaKeys.map(k => {
-      const isGps     = k.startsWith('GPS:');
-      const isRemoved = cleanMode === 'all' || (cleanMode === 'gps' && isGps);
-      return `<tr>
-        <td class="${isGps ? 'tag-gps' : ''}">${escHtml(k.replace(/^\w+:/,''))}</td>
-        <td class="${isRemoved ? 'tag-removed' : ''}">${escHtml(meta[k])}</td>
-        <td>${isRemoved ? '🗑️ Removed' : '✅ Kept'}</td>
-      </tr>`;
-    }).join('');
-    metaHtml = `<table class="meta-table">
-      <thead><tr><th>Field</th><th>Value</th><th>Status</th></tr></thead>
-      <tbody>${rows}</tbody>
-    </table>`;
-  }
-
   const origSrc    = item.preview_b64 || '';
   const cleanedSrc = cleanData.cleaned_preview_b64 || '';
+  const diffHtml   = renderDiffTable(meta, afterMeta, activeMode, fieldsToRemove || []);
 
   resultsArea.innerHTML = `
     <div class="result-card">
@@ -306,7 +474,7 @@ function renderSingleResult(item, cleanData, blobUrl) {
         <div class="result-header">
           <div>
             <div class="result-title">🎉 ${escHtml(item.original_name || item.filename)}</div>
-            <div class="result-sub">${fmtBytes(item.original_size)} → ${fmtBytes(cleanData.cleaned_size)}</div>
+            <div class="result-sub">${fmtBytes(item.original_size)} → ${fmtBytes(cleanData.cleaned_size)} · Mode: ${modeLabel}</div>
           </div>
           <span class="risk-badge risk-${risk.level || 'LOW'}">${risk.badge || ''} ${risk.level || 'LOW'} Risk</span>
         </div>
@@ -318,10 +486,12 @@ function renderSingleResult(item, cleanData, blobUrl) {
         <div class="savings-row mt-4">
           <div class="saving-item"><span class="saving-val">${removedCount}</span><span class="saving-lbl">Fields Removed</span></div>
           <div class="saving-item"><span class="saving-val">${bytesSaved >= 0 ? '+' : ''}${fmtBytes(Math.abs(bytesSaved))}</span><span class="saving-lbl">${bytesSaved >= 0 ? 'Bytes Saved' : 'Size Change'}</span></div>
-          <div class="saving-item"><span class="saving-val">${cleanMode === 'all' ? '100%' : 'GPS'}</span><span class="saving-lbl">Metadata Cleared</span></div>
+          <div class="saving-item"><span class="saving-val">${modeLabel}</span><span class="saving-lbl">Clean Mode</span></div>
         </div>
         <div class="actions-row mt-4">
           <a class="btn btn-success" href="${blobUrl}" download="${escHtml(cleanData.cleaned_filename)}">⬇️ Download Clean Image</a>
+          ${original?.blobUrl ? `<a class="btn btn-ghost" href="${original.blobUrl}" download="${escHtml(original.name || 'original')}">↩️ Get Original</a>` : ''}
+          <button class="btn btn-ghost" onclick="exportCSV()">📊 Export CSV</button>
           <span class="countdown-badge">📋 Saved to <strong>session history</strong> below</span>
         </div>
       </div>
@@ -348,14 +518,89 @@ function renderSingleResult(item, cleanData, blobUrl) {
       </div>
       <div class="card">
         <div class="meta-section">
-          <h3>📋 Metadata Details (${metaCount} fields detected)</h3>
-          ${metaHtml}
+          <h3>📋 Metadata Diff — ${metaCount} fields detected</h3>
+          ${diffHtml}
         </div>
       </div>
     </div>`;
 
   initCompareSlider();
 }
+
+/* ── Side-by-Side Diff Table ───────────────────── */
+function renderDiffTable(meta, afterMeta, mode, fieldsToRemove) {
+  const metaKeys = Object.keys(meta).filter(k => k !== 'image_info' && k !== '_error');
+  if (!metaKeys.length) return '<p class="meta-empty">✅ No metadata found in this image</p>';
+
+  function isRemoved(k) {
+    if (mode === 'all') return true;
+    if (mode === 'gps') return k.startsWith('GPS:');
+    // custom: check if field is absent from afterMeta
+    return !(k in afterMeta);
+  }
+
+  const rows = metaKeys.map(k => {
+    const isGps    = k.startsWith('GPS:');
+    const removed  = isRemoved(k);
+    const field    = k.replace(/^\w+:/, '');
+    return `<tr>
+      <td class="${isGps ? 'tag-gps' : ''}">${escHtml(field)}</td>
+      <td class="diff-before">${escHtml(meta[k])}</td>
+      <td class="${removed ? 'diff-removed' : 'diff-kept'}">${removed ? '🗑️ Removed' : '✅ Kept'}</td>
+    </tr>`;
+  }).join('');
+
+  return `<table class="meta-table">
+    <thead>
+      <tr>
+        <th>Field</th>
+        <th class="diff-col-before">Before</th>
+        <th class="diff-col-after">After</th>
+      </tr>
+    </thead>
+    <tbody>${rows}</tbody>
+  </table>`;
+}
+
+/* ── CSV Export ─────────────────────────────────── */
+window.exportCSV = function() {
+  if (!_lastSingleMeta) return;
+  const { meta, afterMeta, mode, filename } = _lastSingleMeta;
+  const metaKeys = Object.keys(meta).filter(k => k !== 'image_info' && k !== '_error');
+
+  function isRemoved(k) {
+    if (mode === 'all') return true;
+    if (mode === 'gps') return k.startsWith('GPS:');
+    return !(k in afterMeta);
+  }
+
+  const rows = [['Field', 'Value', 'Status', 'Category']];
+
+  // Image info block
+  const info = meta.image_info || {};
+  for (const [k, v] of Object.entries(info)) {
+    rows.push([k, String(v), 'Kept (basic info)', 'Image Info']);
+  }
+
+  // EXIF fields
+  for (const k of metaKeys) {
+    const removed  = isRemoved(k);
+    const category = k.startsWith('GPS:') ? 'GPS' : k.split(':')[0];
+    const field    = k.replace(/^\w+:/, '');
+    rows.push([field, String(meta[k]), removed ? 'Removed' : 'Kept', category]);
+  }
+
+  const csv   = rows.map(r => r.map(c => `"${String(c).replace(/"/g, '""')}"`).join(',')).join('\r\n');
+  const blob  = new Blob([csv], { type: 'text/csv;charset=utf-8;' });
+  const url   = URL.createObjectURL(blob);
+  const a     = document.createElement('a');
+  a.href      = url;
+  a.download  = filename.replace(/\.[^.]+$/, '') + '_metadata.csv';
+  document.body.appendChild(a);
+  a.click();
+  document.body.removeChild(a);
+  setTimeout(() => URL.revokeObjectURL(url), 2000);
+};
 
 /* ── Compare Slider ──────────────────────────────── */
 function initCompareSlider() {
@@ -430,23 +675,73 @@ function renderBulkResult(items, zipBlobUrl) {
       <div class="file-queue" style="display:flex;flex-direction:column;gap:8px;">${rows}</div>
       <p class="history-saved-note">📋 Saved to <strong>session history</strong> below</p>
     </div>`;
+
+  // Show batch GPS map if any images have GPS coordinates
+  const gpsPoints = items
+    .filter(i => !i.error && i.gps)
+    .map(i => ({ lat: i.gps.lat, lon: i.gps.lon, name: i.original_name || i.filename }));
+
+  if (gpsPoints.length > 0) {
+    batchMapWrap.classList.remove('hidden');
+    // Delay to let DOM render before Leaflet initializes
+    setTimeout(() => initBatchMap('batchLeafletMap', gpsPoints), 80);
+  } else {
+    batchMapWrap.classList.add('hidden');
+  }
+}
+
+/* ── Batch GPS Map (Leaflet) ────────────────────── */
+function initBatchMap(containerId, points) {
+  if (!points.length) return;
+  if (typeof L === 'undefined') {
+    console.warn('Leaflet not loaded — batch GPS map unavailable');
+    return;
+  }
+
+  // Destroy previous instance
+  if (_batchLeafletMap) {
+    _batchLeafletMap.remove();
+    _batchLeafletMap = null;
+  }
+
+  const centerLat = points.reduce((s, p) => s + p.lat, 0) / points.length;
+  const centerLon = points.reduce((s, p) => s + p.lon, 0) / points.length;
+
+  const map = L.map(containerId, { scrollWheelZoom: false })
+    .setView([centerLat, centerLon], points.length === 1 ? 14 : 8);
+  _batchLeafletMap = map;
+
+  L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+    attribution: '© <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors',
+    maxZoom: 19,
+  }).addTo(map);
+
+  points.forEach(p => {
+    L.marker([p.lat, p.lon])
+      .addTo(map)
+      .bindPopup(`<strong>${escHtml(p.name)}</strong><br><code style="font-size:.78rem">${p.lat.toFixed(5)}, ${p.lon.toFixed(5)}</code>`);
+  });
+
+  if (points.length > 1) {
+    const bounds = L.latLngBounds(points.map(p => [p.lat, p.lon]));
+    map.fitBounds(bounds, { padding: [30, 30] });
+  }
 }
 
 /* ── Session History ─────────────────────────────── */
 function renderHistory() {
-  const histSec  = historySection  || document.getElementById('historySection');
-  const histList = historyList     || document.getElementById('historyList');
-  if (!histSec || !histList) return;
+  if (!historySection || !historyList) return;
 
   if (!sessionHistory.length) {
-    histSec.classList.add('hidden');
+    historySection.classList.add('hidden');
     return;
   }
 
-  histSec.classList.remove('hidden');
+  historySection.classList.remove('hidden');
+  renderPrivacyChart();
 
-  histList.innerHTML = sessionHistory.map((entry, i) => {
-    const riskLevel = entry.risk.level || 'LOW';
+  historyList.innerHTML = sessionHistory.map((entry, i) => {
+    const riskLevel = entry.risk?.level || 'LOW';
     const isBulk    = entry.type === 'bulk';
 
     const thumb = entry.preview
@@ -454,11 +749,15 @@ function renderHistory() {
       : `<div class="hist-thumb hist-thumb-bulk">🗜️</div>`;
 
     const badge = !isBulk
-      ? `<span class="risk-badge risk-${riskLevel}" style="font-size:.72rem;padding:3px 10px;">${entry.risk.badge || ''} ${riskLevel}</span>`
+      ? `<span class="risk-badge risk-${riskLevel}" style="font-size:.72rem;padding:3px 10px;">${entry.risk?.badge || ''} ${riskLevel}</span>`
       : `<span class="hist-bulk-badge">ZIP</span>`;
 
     const savings = entry.bytesSaved > 0
       ? `<span class="hist-saved">+${fmtBytes(entry.bytesSaved)} saved</span>`
+      : '';
+
+    const originalBtn = entry.originalBlobUrl
+      ? `<a class="btn btn-ghost hist-dl-btn" href="${entry.originalBlobUrl}" download="${escHtml(entry.originalFilename || 'original')}" title="Download uncleaned original">↩️ Original</a>`
       : '';
 
     return `
@@ -472,20 +771,59 @@ function renderHistory() {
           </div>
           <div class="hist-badges">${badge}</div>
         </div>
-        <a class="btn btn-ghost hist-dl-btn" href="${entry.blobUrl}" download="${escHtml(entry.filename)}">⬇️ Re-download</a>
-        <button class="hist-remove" onclick="removeHistory(${i})" title="Remove from history">✕</button>
+        <div class="hist-actions">
+          <a class="btn btn-ghost hist-dl-btn" href="${entry.blobUrl}" download="${escHtml(entry.filename)}">⬇️ Re-download</a>
+          ${originalBtn}
+          <button class="hist-remove" onclick="removeHistory(${i})" title="Remove from history">✕</button>
+        </div>
       </div>`;
   }).join('');
 }
 
+/* ── Privacy Score Chart ─────────────────────────── */
+function renderPrivacyChart() {
+  if (!privacyChartEl) return;
+  const singles = sessionHistory.filter(e => e.type === 'single' && e.risk?.score !== undefined);
+  if (!singles.length) {
+    privacyChartEl.innerHTML = '';
+    return;
+  }
+
+  const bars = [...singles].reverse().map(e => {
+    const score = e.risk.score || 0;
+    const level = e.risk.level || 'LOW';
+    const h     = Math.max(4, Math.round((score / 100) * 56));
+    const name  = (e.name || '').replace(/\.[^.]+$/, '').slice(0, 8);
+    return `<div class="chart-col">
+      <div class="chart-bar-wrap">
+        <div class="chart-bar-${level}" style="height:${h}px" title="${escHtml(e.name)}: ${score}/100"></div>
+      </div>
+      <div class="chart-score">${score}</div>
+    </div>`;
+  }).join('');
+
+  privacyChartEl.innerHTML = `
+    <div class="privacy-chart">
+      <div class="chart-title">Session Risk Scores &nbsp;(oldest → newest)</div>
+      <div class="chart-bars">${bars}</div>
+    </div>`;
+}
+
 window.removeHistory = function(i) {
-  if (sessionHistory[i]) URL.revokeObjectURL(sessionHistory[i].blobUrl);
+  const entry = sessionHistory[i];
+  if (entry) {
+    if (entry.blobUrl)         URL.revokeObjectURL(entry.blobUrl);
+    if (entry.originalBlobUrl) URL.revokeObjectURL(entry.originalBlobUrl);
+  }
   sessionHistory.splice(i, 1);
   renderHistory();
 };
 
 window.clearHistory = function() {
-  sessionHistory.forEach(e => URL.revokeObjectURL(e.blobUrl));
+  sessionHistory.forEach(e => {
+    if (e.blobUrl)         URL.revokeObjectURL(e.blobUrl);
+    if (e.originalBlobUrl) URL.revokeObjectURL(e.originalBlobUrl);
+  });
   sessionHistory = [];
   renderHistory();
 };

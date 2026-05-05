@@ -147,6 +147,35 @@ def extract_metadata(filepath):
     return result
 
 
+def extract_metadata_fields(filepath):
+    """Return a list of {key, label, value, is_gps} dicts for the custom editor.
+    key is in the format 'ifd_name:tag_id' used by remove_custom_fields()."""
+    fields = []
+    try:
+        img = Image.open(filepath)
+        raw_exif = img.info.get("exif")
+        if not raw_exif:
+            return fields
+        exif_dict = piexif.load(raw_exif)
+        for ifd_name, ifd_data in exif_dict.items():
+            if not isinstance(ifd_data, dict):
+                continue
+            friendly_map = FRIENDLY_TAGS.get(ifd_name, {})
+            for tag_id, value in ifd_data.items():
+                label = friendly_map.get(tag_id, f"Tag {tag_id}")
+                fields.append({
+                    "key":    f"{ifd_name}:{tag_id}",
+                    "label":  label,
+                    "ifd":    ifd_name,
+                    "tag_id": tag_id,
+                    "value":  _decode_value(value),
+                    "is_gps": ifd_name == "GPS",
+                })
+    except Exception:
+        pass
+    return fields
+
+
 def get_raw_exif_dict(filepath):
     try:
         img = Image.open(filepath)
